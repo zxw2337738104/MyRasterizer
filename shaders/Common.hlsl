@@ -35,7 +35,7 @@ struct InstanceData
 };
 
 // ËùÓĞÂş·´ÉäÌùÍ¼
-Texture2D gTextureMap[6] : register(t1);
+Texture2D gTextureMap[8] : register(t1);
 //TextureCube gCubeMap : register(t0);
 //Texture2D gShadowMap : register(t2);
 //Texture2D gSsaoMap : register(t3);

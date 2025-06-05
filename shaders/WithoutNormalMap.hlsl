@@ -70,10 +70,6 @@ float4 PS(VertexOut pin) : SV_Target
     
     diffuseAlbedo *= gTextureMap[diffuseTexIndex].Sample(gsamAnisotropicWrap, pin.TexC);
     
-    #ifdef ALPHA_TEST
-        clip(diffuseAlbedo.a - 0.1f);
-    #endif
-    
     pin.NormalW = normalize(pin.NormalW);
     
     float3 toEyeW = normalize(gEyePosw - pin.PosW);
@@ -90,8 +86,8 @@ float4 PS(VertexOut pin) : SV_Target
     Material mat = { diffuseAlbedo, gFresnelR0, shininess };
     float3 shadowFactor = 1.0f;
     //shadowFactor[0] = CalcShadowFactor(pin.ShadowPosH);
-    float4 directLight = ComputeLighting(gLights, mat, pin.PosW, bumpedNormalW, toEyeW, shadowFactor);
-    //float4 directLight = ComputeLighting(gLights, mat, pin.PosW, pin.NormalW, toEyeW, shadowFactor);
+    //float4 directLight = ComputeLighting(gLights, mat, pin.PosW, bumpedNormalW, toEyeW, shadowFactor);
+    float4 directLight = ComputeLighting(gLights, mat, pin.PosW, pin.NormalW, toEyeW, shadowFactor);
     
     float4 litColor = ambient + directLight;
     
@@ -101,7 +97,7 @@ float4 PS(VertexOut pin) : SV_Target
     
     //litColor.rgb += shininess * fresnelFactor * reflectionColor.rgb;
     
-    litColor.a = diffuseAlbedo.a * 0.4f;
+    //litColor.a = diffuseAlbedo.a;
 	
     return litColor;
 }
