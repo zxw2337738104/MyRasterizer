@@ -81,7 +81,7 @@ float4 PS(VertexOut pin) : SV_Target
     float4 ambient = gAmbientLight * diffuseAlbedo;
 
     //防止 normalMapSample.a 为 0 时，导致除以 0 的情况
-    const float shininess = (1.0f - gRoughness) * (normalMapSample.a != 0.0f ? normalMapSample.a : 0.1f);
+    const float shininess = (1.0f - gRoughness) * (normalMapSample.a != 0.0f ? normalMapSample.a : 0.0001f);
     //const float shininess = (1.0f - gRoughness) * 256.0f; // Assuming gRoughness is a float3, using x component for shininess.
     Material mat = { diffuseAlbedo, gFresnelR0, shininess };
     float3 shadowFactor = 1.0f;

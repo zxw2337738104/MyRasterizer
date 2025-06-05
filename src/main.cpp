@@ -480,8 +480,8 @@ void MySoftRasterizationApp::BuildRenderItems()
 	sphereRitem->InstanceCount = 0;
 	sphereRitem->Instances.resize(1);
 	sphereRitem->Instances[0].World = MathHelper::Identity4x4();
-	//sphereRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
-	XMStoreFloat4x4(&sphereRitem->Instances[0].TexTransform, XMMatrixScaling(3.0f, 3.0f, 3.0f));
+	sphereRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
+	//XMStoreFloat4x4(&sphereRitem->Instances[0].TexTransform, XMMatrixScaling(3.0f, 3.0f, 3.0f));
 	sphereRitem->Instances[0].MaterialIndex = 1;
 
 	mRitemLayer[(int)RenderLayer::Opaque].push_back(sphereRitem.get());
