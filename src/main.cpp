@@ -14,6 +14,7 @@ enum class RenderLayer
 	WithoutNormalMap,
 	AlphaTested,
 	Transparent,
+	Sky,
 	Count
 };
 
@@ -120,6 +121,8 @@ private:
 	Camera mCamera;
 
 	UINT mImGuiSrvIndex = 0;
+	UINT mSkyTexSrvIndex = 0;
+	UINT mDynamicSrvIndex = 0;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nShowCmd)
@@ -183,7 +186,7 @@ bool MySoftRasterizationApp::Init()
 void MySoftRasterizationApp::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 9; // Adjust as needed
+	srvHeapDesc.NumDescriptors = 10; // Adjust as needed
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -229,6 +232,13 @@ void MySoftRasterizationApp::BuildDescriptorHeaps()
 
 		hDescriptor.Offset(1, mCbv_srv_uavDescriptorSize);
 	}
+
+	// Create SRV for the sky cube map
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+	srvDesc.Format = skyCubeMap->GetDesc().Format;
+	srvDesc.Texture2D.MipLevels = skyCubeMap->GetDesc().MipLevels;
+	md3dDevice->CreateShaderResourceView(skyCubeMap.Get(), &srvDesc, hDescriptor);
+	mSkyTexSrvIndex = tex2DList.size() + 1; // Sky texture is at the end of the heap
 }
 
 void MySoftRasterizationApp::BuildRootSignature()
@@ -245,7 +255,7 @@ void MySoftRasterizationApp::BuildRootSignature()
 	//MaterialSB
 	rootParameters[3].InitAsShaderResourceView(0, 1);
 	//SRV for Textures
-	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 8, 1));
+	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 9, 1));
 
 	auto staticSamplers = GetStaticSamplers();
 
@@ -273,6 +283,9 @@ void MySoftRasterizationApp::BuildShadersAndInputLayout()
 	mShaders["withoutNormalMapPS"] = CompileShader(L"shaders\\WithoutNormalMap.hlsl", nullptr, "PS", "ps_5_1");
 	mShaders["alphaTestedPS"] = CompileShader(L"shaders\\Standard.hlsl", alphaTestedDefines, "PS", "ps_5_1");
 
+	mShaders["skyVS"] = CompileShader(L"shaders\\Sky.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["skyPS"] = CompileShader(L"shaders\\Sky.hlsl", nullptr, "PS", "ps_5_1");
+
 	mInputLayout = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -286,8 +299,8 @@ void MySoftRasterizationApp::BuildPSOs()
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC opaquePsoDesc = {};
 	opaquePsoDesc.InputLayout = { mInputLayout.data(), (UINT)mInputLayout.size() };
 	opaquePsoDesc.pRootSignature = mRootSignature.Get();
-	opaquePsoDesc.VS = { mShaders["standardVS"]->GetBufferPointer(), mShaders["standardVS"]->GetBufferSize() };
-	opaquePsoDesc.PS = { mShaders["opaquePS"]->GetBufferPointer(), mShaders["opaquePS"]->GetBufferSize() };
+	opaquePsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["standardVS"]->GetBufferPointer()), mShaders["standardVS"]->GetBufferSize() };
+	opaquePsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["opaquePS"]->GetBufferPointer()), mShaders["opaquePS"]->GetBufferSize() };
 	opaquePsoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	opaquePsoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 	opaquePsoDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
@@ -300,11 +313,11 @@ void MySoftRasterizationApp::BuildPSOs()
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&opaquePsoDesc, IID_PPV_ARGS(&mPSOs["opaque"])));
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC withoutNormalMapPsoDesc = opaquePsoDesc;
-	withoutNormalMapPsoDesc.PS = { mShaders["withoutNormalMapPS"]->GetBufferPointer(), mShaders["withoutNormalMapPS"]->GetBufferSize() };
+	withoutNormalMapPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["withoutNormalMapPS"]->GetBufferPointer()), mShaders["withoutNormalMapPS"]->GetBufferSize() };
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&withoutNormalMapPsoDesc, IID_PPV_ARGS(&mPSOs["withoutNormalMap"])));
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC alphaTestedPsoDesc = opaquePsoDesc;
-	alphaTestedPsoDesc.PS = { mShaders["alphaTestedPS"]->GetBufferPointer(), mShaders["alphaTestedPS"]->GetBufferSize() };
+	alphaTestedPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["alphaTestedPS"]->GetBufferPointer()), mShaders["alphaTestedPS"]->GetBufferSize() };
 	alphaTestedPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE; // Disable culling for alpha tested objects
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&alphaTestedPsoDesc, IID_PPV_ARGS(&mPSOs["alphaTested"])));
 
@@ -323,6 +336,13 @@ void MySoftRasterizationApp::BuildPSOs()
 
 	transparentPsoDesc.BlendState.RenderTarget[0] = transparentBlendDesc;
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&transparentPsoDesc, IID_PPV_ARGS(&mPSOs["transparent"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC skyPsoDesc = opaquePsoDesc;
+	skyPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["skyVS"]->GetBufferPointer()), mShaders["skyVS"]->GetBufferSize() };
+	skyPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["skyPS"]->GetBufferPointer()), mShaders["skyPS"]->GetBufferSize() };
+	skyPsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_FRONT; // Skybox is rendered with front culling
+	skyPsoDesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL; // Skybox depth test
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&skyPsoDesc, IID_PPV_ARGS(&mPSOs["sky"])));
 }
 
 void MySoftRasterizationApp::BuildFrameResources()
@@ -602,6 +622,19 @@ void MySoftRasterizationApp::BuildRenderItems()
 	mRitemLayer[(int)RenderLayer::Transparent].push_back(transparentSphereRitem.get());
 
 	mAllRitems.push_back(std::move(transparentSphereRitem));
+
+	auto skySphereRitem = std::make_unique<RenderItem>();
+	skySphereRitem->Geo = mGeometries["shapeGeo"].get();
+	skySphereRitem->IndexCount = skySphereRitem->Geo->DrawArgs["sphere"].IndexCount;
+	skySphereRitem->StartIndexLocation = skySphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
+	skySphereRitem->BaseVertexLocation = skySphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
+	skySphereRitem->InstanceCount = 0;
+	skySphereRitem->Instances.resize(1);
+	XMStoreFloat4x4(&skySphereRitem->Instances[0].World, XMMatrixScaling(1.0f, 1.0f, 1.0f));
+	skySphereRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
+	skySphereRitem->Instances[0].MaterialIndex = 2; // Assuming sky material is at index 5
+	mRitemLayer[(int)RenderLayer::Sky].push_back(skySphereRitem.get());
+	mAllRitems.push_back(std::move(skySphereRitem));
 }
 
 void MySoftRasterizationApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*> ritems)
@@ -680,6 +713,9 @@ void MySoftRasterizationApp::Draw()
 
 	mCommandList->SetPipelineState(mPSOs["withoutNormalMap"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::WithoutNormalMap]);
+
+	mCommandList->SetPipelineState(mPSOs["sky"].Get());
+	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Sky]);
 
 	mCommandList->SetPipelineState(mPSOs["alphaTested"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::AlphaTested]);
