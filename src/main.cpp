@@ -4,6 +4,7 @@
 #include "GeometryGenerator.h"
 #include "Camera.h"
 #include "CreateDefaultBuffer.h"
+#include "CubeRenderTarget.h"
 #include "../utils/DDSTextureLoader.h"
 
 const int gNumFrameResources = 3;
@@ -86,6 +87,13 @@ private:
 	void UpdateInstanceBuffers(GameTime& gt);
 	void UpdateMainPassCBs();
 	void UpdateMaterialCBs(GameTime& gt);
+	void UpdateCubeMapFacePassCBs();
+
+	virtual void CreateDescriptorHeap() override;
+
+	void BuildCubeDepthStencil();
+	void BuildCubeMapCamera();
+	void DrawSceneToCubeMap();
 
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
@@ -119,10 +127,14 @@ private:
 	XMFLOAT4X4 mProj = MathHelper::Identity4x4();
 
 	Camera mCamera;
+	Camera mCubeMapCamera[6];
 
 	UINT mImGuiSrvIndex = 0;
 	UINT mSkyTexSrvIndex = 0;
 	UINT mDynamicSrvIndex = 0;
+
+	std::unique_ptr<CubeRenderTarget> mDynamicCubeMap = nullptr;
+	CD3DX12_CPU_DESCRIPTOR_HANDLE mCubeDSV;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nShowCmd)
@@ -239,6 +251,24 @@ void MySoftRasterizationApp::BuildDescriptorHeaps()
 	srvDesc.Texture2D.MipLevels = skyCubeMap->GetDesc().MipLevels;
 	md3dDevice->CreateShaderResourceView(skyCubeMap.Get(), &srvDesc, hDescriptor);
 	mSkyTexSrvIndex = tex2DList.size() + 1; // Sky texture is at the end of the heap
+
+	mDynamicSrvIndex = mSkyTexSrvIndex + 1; // Dynamic texture will be at the next index
+	auto srvCpuStart = mSrvDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	auto srvGpuStart = mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+	auto rtvCpuStart = mRtvHeap->GetCPUDescriptorHandleForHeapStart();
+
+	int rtvOffset = SwapChainBufferCount;
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE cubeRtvHandles[6];
+	for (int i = 0; i < 6; ++i)
+	{
+		cubeRtvHandles[i] = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+			rtvCpuStart,
+			rtvOffset + i,
+			mRtvDescriptorSize);
+	}
+
+	
 }
 
 void MySoftRasterizationApp::BuildRootSignature()
