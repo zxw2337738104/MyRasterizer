@@ -62,6 +62,7 @@ float4 PS(VertexOut pin) : SV_Target
     float3 gFresnelR0 = matData.FresnelR0;
     uint diffuseTexIndex = matData.DiffuseMapIndex;
     uint normalTexIndex = matData.NormalMapIndex;
+    uint cubeMapIndex = matData.CubeMapIndex;
     
     pin.NormalW = normalize(pin.NormalW);
     
@@ -95,11 +96,11 @@ float4 PS(VertexOut pin) : SV_Target
     
     float4 litColor = ambient + directLight;
     
-    //float3 r = reflect(-toEyeW, bumpedNormalW);
-    //float4 reflectionColor = gCubeMap.Sample(gsamAnisotropicWrap, r);
-    //float3 fresnelFactor = SchlickFresnel(gFresnelR0, bumpedNormalW, r);
+    float3 r = reflect(-toEyeW, pin.NormalW);
+    float4 reflectionColor = gCubeMap[cubeMapIndex].Sample(gsamAnisotropicWrap, r);
+    float3 fresnelFactor = SchlickFresnel(gFresnelR0, bumpedNormalW, r);
     
-    //litColor.rgb += shininess * fresnelFactor * reflectionColor.rgb;
+    litColor.rgb += shininess * fresnelFactor * reflectionColor.rgb;
     
     litColor.a = diffuseAlbedo.a * 0.4f;
 	

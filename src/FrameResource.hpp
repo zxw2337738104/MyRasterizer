@@ -65,7 +65,7 @@ struct MaterialData
 
 	UINT DiffuseMapIndex = 0;
 	UINT NormalMapIndex = 0;
-	UINT MaterialPad0;
+	UINT CubeMapIndex = 0;
 	UINT MaterialPad1;
 };
 

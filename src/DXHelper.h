@@ -52,6 +52,7 @@ struct Material
 	int MatCBIndex = -1;
 	int DiffuseSrvHeapIndex = -1;
 	int NormalSrvHeapIndex = -1;
+	int CubeMapInex = 0;
 	int NumFramesDirty = 3;
 	XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
 	XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };

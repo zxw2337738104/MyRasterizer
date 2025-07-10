@@ -11,6 +11,8 @@ struct VertexOut
 {
     float4 PosH : SV_Position;
     float3 PosL : POSITION;
+    
+    nointerpolation uint MatIndex : MATINDEX;
 };
 
 VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
@@ -19,6 +21,7 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     
     InstanceData instData = gInstanceData[instanceID];
     float4x4 gWorld = instData.World;
+    vout.MatIndex = instData.MaterialIndex;
     
     vout.PosL = vin.PosL;
     float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
@@ -29,5 +32,7 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
 
 float4 PS(VertexOut pin) : SV_Target
 {
-    return gCubeMap.Sample(gsamLinearWrap, pin.PosL);
+    MaterialData matData = gMaterialData[pin.MatIndex];
+    uint cubeMapIndex = matData.CubeMapIndex;
+    return gCubeMap[cubeMapIndex].Sample(gsamLinearWrap, pin.PosL);
 }

@@ -9,6 +9,8 @@
 
 const int gNumFrameResources = 3;
 
+const UINT CubeMapSize = 512;
+
 enum class RenderLayer
 {
 	Opaque = 0,
@@ -16,6 +18,7 @@ enum class RenderLayer
 	AlphaTested,
 	Transparent,
 	Sky,
+	OpaqueDynamicReflectors,
 	Count
 };
 
@@ -81,7 +84,6 @@ private:
 	virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
 	virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
 	virtual void OnResize() override;
-	//virtual void CreateDescriptorHeap() override;
 
 	//void UpdateObjectCBs(GameTime& gt);
 	void UpdateInstanceBuffers(GameTime& gt);
@@ -92,11 +94,12 @@ private:
 	virtual void CreateDescriptorHeap() override;
 
 	void BuildCubeDepthStencil();
-	void BuildCubeMapCamera();
+	void BuildCubeMapCamera(float x, float y, float z);
 	void DrawSceneToCubeMap();
 
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
+	ComPtr<ID3D12Resource> mCubeDepthStencilBuffer = nullptr;
 
 	std::vector<D3D12_INPUT_ELEMENT_DESC> mInputLayout;
 	std::vector<std::unique_ptr<RenderItem>> mAllRitems;
@@ -172,6 +175,11 @@ bool MySoftRasterizationApp::Init()
 
 	mCamera.SetPosition(0.0f, 2.0f, -15.0f);
 
+	BuildCubeMapCamera(8.0f, 0.0f, 0.0f);
+
+	mDynamicCubeMap = std::make_unique<CubeRenderTarget>(md3dDevice.Get(),
+		CubeMapSize, CubeMapSize, DXGI_FORMAT_R8G8B8A8_UNORM);
+
 	LoadTextures();
 	BuildDescriptorHeaps();
 	BuildRootSignature();
@@ -180,6 +188,7 @@ bool MySoftRasterizationApp::Init()
 	BuildMaterial();
 	BuildRenderItems();
 	BuildFrameResources();
+	BuildCubeDepthStencil();
 	BuildPSOs();
 
 	
@@ -195,10 +204,32 @@ bool MySoftRasterizationApp::Init()
 	return true;
 }
 
+void MySoftRasterizationApp::CreateDescriptorHeap()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
+	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + 6; // 6 for the cube map faces
+	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&mRtvHeap)));
+
+	D3D12_DESCRIPTOR_HEAP_DESC dsvHeapDesc = {};
+	dsvHeapDesc.NumDescriptors = 2;
+	dsvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	dsvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	dsvHeapDesc.NodeMask = 0;
+	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&dsvHeapDesc, IID_PPV_ARGS(&mDsvHeap)));
+
+	mCubeDSV = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+		mDsvHeap->GetCPUDescriptorHandleForHeapStart(),
+		1,
+		mDsvDescriptorSize
+	);
+}
+
 void MySoftRasterizationApp::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 10; // Adjust as needed
+	srvHeapDesc.NumDescriptors = 11; // Adjust as needed
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -268,7 +299,78 @@ void MySoftRasterizationApp::BuildDescriptorHeaps()
 			mRtvDescriptorSize);
 	}
 
-	
+	mDynamicCubeMap->BuildDescriptors(
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mDynamicSrvIndex, mCbv_srv_uavDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mDynamicSrvIndex, mCbv_srv_uavDescriptorSize),
+		cubeRtvHandles);
+}
+
+void MySoftRasterizationApp::BuildCubeDepthStencil()
+{
+	D3D12_RESOURCE_DESC depthStencilDesc;
+	depthStencilDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	depthStencilDesc.Alignment = 0;
+	depthStencilDesc.Width = CubeMapSize;
+	depthStencilDesc.Height = CubeMapSize;
+	depthStencilDesc.DepthOrArraySize = 1;
+	depthStencilDesc.MipLevels = 1;
+	depthStencilDesc.Format = mDepthStencilFormat;
+	depthStencilDesc.SampleDesc.Count = 1;
+	depthStencilDesc.SampleDesc.Quality = 0;
+	depthStencilDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	depthStencilDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+	D3D12_CLEAR_VALUE optClear;
+	optClear.Format = mDepthStencilFormat;
+	optClear.DepthStencil.Depth = 1.0f;
+	optClear.DepthStencil.Stencil = 0;
+
+	ThrowIfFailed(md3dDevice->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&depthStencilDesc,
+		D3D12_RESOURCE_STATE_COMMON,
+		&optClear,
+		IID_PPV_ARGS(mCubeDepthStencilBuffer.GetAddressOf())
+	));
+
+	md3dDevice->CreateDepthStencilView(mCubeDepthStencilBuffer.Get(), nullptr, mCubeDSV);
+
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mCubeDepthStencilBuffer.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_DEPTH_WRITE));
+}
+
+void MySoftRasterizationApp::BuildCubeMapCamera(float x, float y, float z)
+{
+	XMFLOAT3 center(x, y, z);
+	XMFLOAT3 worldUp(0.0f, 1.0f, 0.0f);
+
+	XMFLOAT3 targets[6] =
+	{
+		XMFLOAT3(x + 1.0f, y, z), // +X
+		XMFLOAT3(x - 1.0f, y, z), // -X
+		XMFLOAT3(x, y + 1.0f, z), // +Y
+		XMFLOAT3(x, y - 1.0f, z), // -Y
+		XMFLOAT3(x, y, z + 1.0f), // +Z
+		XMFLOAT3(x, y, z - 1.0f)  // -Z
+	};
+
+	XMFLOAT3 ups[6] =
+	{
+		XMFLOAT3(0.0f, 1.0f, 0.0f), // +X
+		XMFLOAT3(0.0f, 1.0f, 0.0f), // -X
+		XMFLOAT3(0.0f, 0.0f, -1.0f), // +Y
+		XMFLOAT3(0.0f, 0.0f, 1.0f), // -Y
+		XMFLOAT3(0.0f, 1.0f, 0.0f), // +Z
+		XMFLOAT3(0.0f, 1.0f, 0.0f)  // -Z
+	};
+
+	for (int i = 0; i < 6; ++i)
+	{
+		mCubeMapCamera[i].SetLens(XM_PI / 2.0f, 1.0f, 0.1f, 100.0f);
+		mCubeMapCamera[i].LookAt(center, targets[i], ups[i]);
+		mCubeMapCamera[i].UpdateViewMatrix();
+	}
 }
 
 void MySoftRasterizationApp::BuildRootSignature()
@@ -281,11 +383,12 @@ void MySoftRasterizationApp::BuildRootSignature()
 	rootParameters[1].InitAsConstantBufferView(0);
 	//ObjectCB
 	//rootParameters[2].InitAsConstantBufferView(1);
-	rootParameters[2].InitAsShaderResourceView(1, 1); // InstanceBuffer
+	// InstanceBuffer
+	rootParameters[2].InitAsShaderResourceView(1, 1);
 	//MaterialSB
 	rootParameters[3].InitAsShaderResourceView(0, 1);
 	//SRV for Textures
-	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 9, 1));
+	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 10, 1));
 
 	auto staticSamplers = GetStaticSamplers();
 
@@ -385,7 +488,7 @@ void MySoftRasterizationApp::BuildFrameResources()
 	for (int i = 0; i < gNumFrameResources; ++i)
 	{
 		mFrameResources.push_back(std::make_unique<FrameResource>(
-			md3dDevice.Get(), 1, InstancesSize, (UINT)mMaterials.size(), 0));
+			md3dDevice.Get(), 1 + 6, InstancesSize, (UINT)mMaterials.size(), 0));
 	}
 }
 
@@ -573,11 +676,22 @@ void MySoftRasterizationApp::BuildMaterial()
 	water->FresnelR0 = XMFLOAT3(0.1f, 0.1f, 0.1f);
 	water->Roughness = 0.0f;
 
+	auto mirror = std::make_unique<Material>();
+	mirror->Name = "mirror";
+	mirror->MatCBIndex = 5;
+	mirror->DiffuseSrvHeapIndex = 4;
+	mirror->NormalSrvHeapIndex = 5;
+	mirror->CubeMapInex = 1;
+	mirror->DiffuseAlbedo = XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f);
+	mirror->FresnelR0 = XMFLOAT3(0.98f, 0.97f, 0.95f);
+	mirror->Roughness = 0.1f;
+
 	mMaterials["bricks0"] = std::move(bricks0);
 	mMaterials["tile0"] = std::move(tile0);
 	mMaterials["white1x1"] = std::move(white1x1);
 	mMaterials["wireFence"] = std::move(wireFence);
 	mMaterials["water"] = std::move(water);
+	mMaterials["mirror"] = std::move(mirror);
 }
 
 void MySoftRasterizationApp::BuildRenderItems()
@@ -587,7 +701,6 @@ void MySoftRasterizationApp::BuildRenderItems()
 	sphereRitem->IndexCount = sphereRitem->Geo->DrawArgs["sphere"].IndexCount;
 	sphereRitem->StartIndexLocation = sphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
 	sphereRitem->BaseVertexLocation = sphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
-
 	sphereRitem->InstanceCount = 0;
 	sphereRitem->Instances.resize(2);
 	sphereRitem->Instances[0].World = MathHelper::Identity4x4();
@@ -597,9 +710,7 @@ void MySoftRasterizationApp::BuildRenderItems()
 	XMStoreFloat4x4(&sphereRitem->Instances[1].World, XMMatrixTranslation(2.0f, 0.0f, 0.0f));
 	sphereRitem->Instances[1].TexTransform = MathHelper::Identity4x4();
 	sphereRitem->Instances[1].MaterialIndex = 2;
-
 	mRitemLayer[(int)RenderLayer::Opaque].push_back(sphereRitem.get());
-
 	mAllRitems.push_back(std::move(sphereRitem));
 
 	auto withoutNormalMapSphereRitem = std::make_unique<RenderItem>();
@@ -607,16 +718,13 @@ void MySoftRasterizationApp::BuildRenderItems()
 	withoutNormalMapSphereRitem->IndexCount = withoutNormalMapSphereRitem->Geo->DrawArgs["sphere"].IndexCount;
 	withoutNormalMapSphereRitem->StartIndexLocation = withoutNormalMapSphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
 	withoutNormalMapSphereRitem->BaseVertexLocation = withoutNormalMapSphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
-
 	withoutNormalMapSphereRitem->InstanceCount = 0;
 	withoutNormalMapSphereRitem->Instances.resize(1);
 	XMStoreFloat4x4(&withoutNormalMapSphereRitem->Instances[0].World, XMMatrixTranslation(-2.0f, 0.0f, 0.0f));
 	withoutNormalMapSphereRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
 	//XMStoreFloat4x4(&withoutNormalMapSphereRitem->Instances[0].TexTransform, XMMatrixScaling(3.0f, 3.0f, 3.0f));
 	withoutNormalMapSphereRitem->Instances[0].MaterialIndex = 1;
-
 	mRitemLayer[(int)RenderLayer::WithoutNormalMap].push_back(withoutNormalMapSphereRitem.get());
-
 	mAllRitems.push_back(std::move(withoutNormalMapSphereRitem));
 
 	auto alphaTestedSphereRitem = std::make_unique<RenderItem>();
@@ -624,16 +732,13 @@ void MySoftRasterizationApp::BuildRenderItems()
 	alphaTestedSphereRitem->IndexCount = alphaTestedSphereRitem->Geo->DrawArgs["sphere"].IndexCount;
 	alphaTestedSphereRitem->StartIndexLocation = alphaTestedSphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
 	alphaTestedSphereRitem->BaseVertexLocation = alphaTestedSphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
-
 	alphaTestedSphereRitem->InstanceCount = 0;
 	alphaTestedSphereRitem->Instances.resize(1);
 	XMStoreFloat4x4(&alphaTestedSphereRitem->Instances[0].World, XMMatrixTranslation(4.0f, 0.0f, 0.0f));
 	//alphaTestedSphereRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
 	XMStoreFloat4x4(&alphaTestedSphereRitem->Instances[0].TexTransform, XMMatrixScaling(3.0f, 3.0f, 3.0f));
 	alphaTestedSphereRitem->Instances[0].MaterialIndex = 3;
-
 	mRitemLayer[(int)RenderLayer::AlphaTested].push_back(alphaTestedSphereRitem.get());
-
 	mAllRitems.push_back(std::move(alphaTestedSphereRitem));
 
 	auto transparentSphereRitem = std::make_unique<RenderItem>();
@@ -641,16 +746,13 @@ void MySoftRasterizationApp::BuildRenderItems()
 	transparentSphereRitem->IndexCount = transparentSphereRitem->Geo->DrawArgs["sphere"].IndexCount;
 	transparentSphereRitem->StartIndexLocation = transparentSphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
 	transparentSphereRitem->BaseVertexLocation = transparentSphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
-
 	transparentSphereRitem->InstanceCount = 0;
 	transparentSphereRitem->Instances.resize(1);
 	XMStoreFloat4x4(&transparentSphereRitem->Instances[0].World, XMMatrixTranslation(6.0f, 0.0f, 0.0f));
 	//transparentSphereRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
 	XMStoreFloat4x4(&transparentSphereRitem->Instances[0].TexTransform, XMMatrixScaling(3.0f, 3.0f, 3.0f));
 	transparentSphereRitem->Instances[0].MaterialIndex = 4;
-
 	mRitemLayer[(int)RenderLayer::Transparent].push_back(transparentSphereRitem.get());
-
 	mAllRitems.push_back(std::move(transparentSphereRitem));
 
 	auto skySphereRitem = std::make_unique<RenderItem>();
@@ -665,6 +767,19 @@ void MySoftRasterizationApp::BuildRenderItems()
 	skySphereRitem->Instances[0].MaterialIndex = 2; // Assuming sky material is at index 5
 	mRitemLayer[(int)RenderLayer::Sky].push_back(skySphereRitem.get());
 	mAllRitems.push_back(std::move(skySphereRitem));
+
+	auto dynamicReflectionSphereRitem = std::make_unique<RenderItem>();
+	dynamicReflectionSphereRitem->Geo = mGeometries["shapeGeo"].get();
+	dynamicReflectionSphereRitem->IndexCount = dynamicReflectionSphereRitem->Geo->DrawArgs["sphere"].IndexCount;
+	dynamicReflectionSphereRitem->StartIndexLocation = dynamicReflectionSphereRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
+	dynamicReflectionSphereRitem->BaseVertexLocation = dynamicReflectionSphereRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
+	dynamicReflectionSphereRitem->InstanceCount = 0;
+	dynamicReflectionSphereRitem->Instances.resize(1);
+	XMStoreFloat4x4(&dynamicReflectionSphereRitem->Instances[0].World, XMMatrixTranslation(8.0f, 0.0f, 0.0f));
+	dynamicReflectionSphereRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
+	dynamicReflectionSphereRitem->Instances[0].MaterialIndex = 5; // Assuming mirror material is at index 6
+	mRitemLayer[(int)RenderLayer::OpaqueDynamicReflectors].push_back(dynamicReflectionSphereRitem.get());
+	mAllRitems.push_back(std::move(dynamicReflectionSphereRitem));
 }
 
 void MySoftRasterizationApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList, const std::vector<RenderItem*> ritems)
@@ -698,6 +813,49 @@ void MySoftRasterizationApp::DrawRenderItems(ID3D12GraphicsCommandList* cmdList,
 	}
 }
 
+void MySoftRasterizationApp::DrawSceneToCubeMap()
+{
+	mCommandList->RSSetViewports(1, &mDynamicCubeMap->Viewport());
+	mCommandList->RSSetScissorRects(1, &mDynamicCubeMap->ScissorRect());
+
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mDynamicCubeMap->Resource(),
+		D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+	UINT passCBByteSize = CalcConstantBufferByteSize(sizeof(PassConstants));
+
+	for (int i = 0; i < 6; ++i)
+	{
+		mCommandList->ClearRenderTargetView(mDynamicCubeMap->Rtv(i), Colors::LightBlue, 0, nullptr);
+		mCommandList->ClearDepthStencilView(mCubeDSV, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+
+		mCommandList->OMSetRenderTargets(1, &mDynamicCubeMap->Rtv(i), true, &mCubeDSV);
+
+		auto passCB = mCurrFrameResource->PassCB->Resource();
+		D3D12_GPU_VIRTUAL_ADDRESS passCBAddress = passCB->GetGPUVirtualAddress() + (1 + i) * passCBByteSize;
+		mCommandList->SetGraphicsRootConstantBufferView(1, passCBAddress);
+
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+
+		mCommandList->SetPipelineState(mPSOs["withoutNormalMap"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::WithoutNormalMap]);
+
+		mCommandList->SetPipelineState(mPSOs["sky"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Sky]);
+
+		mCommandList->SetPipelineState(mPSOs["alphaTested"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::AlphaTested]);
+
+		mCommandList->SetPipelineState(mPSOs["transparent"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Transparent]);
+
+		mCommandList->SetPipelineState(mPSOs["opaque"].Get());
+	}
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mDynamicCubeMap->Resource(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
+}
+
 void MySoftRasterizationApp::Draw()
 {
 	// Reuse the memory associated with command recording.
@@ -714,14 +872,13 @@ void MySoftRasterizationApp::Draw()
 	//设置根签名
 	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
 
-	auto passCB = mCurrFrameResource->PassCB->Resource();
-	mCommandList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
-
 	auto matSB = mCurrFrameResource->MatSB->Resource();
 	mCommandList->SetGraphicsRootShaderResourceView(3, matSB->GetGPUVirtualAddress());
 
 	CD3DX12_GPU_DESCRIPTOR_HANDLE texDescriptor(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), 1, mCbv_srv_uavDescriptorSize);
 	mCommandList->SetGraphicsRootDescriptorTable(4, texDescriptor);
+
+	DrawSceneToCubeMap();
 
 	// Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
@@ -738,7 +895,11 @@ void MySoftRasterizationApp::Draw()
 	// Specify the buffers we are going to render to.
 	mCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
 
+	auto passCB = mCurrFrameResource->PassCB->Resource();
+	mCommandList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
+
 	mCommandList->SetPipelineState(mPSOs["opaque"].Get());
+	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::OpaqueDynamicReflectors]);
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
 
 	mCommandList->SetPipelineState(mPSOs["withoutNormalMap"].Get());
@@ -987,6 +1148,8 @@ void MySoftRasterizationApp::UpdateMainPassCBs()
 	// 更新常量缓冲区
 	auto currPassCB = mCurrFrameResource->PassCB.get();
 	currPassCB->CopyData(0, mMainPassCB);
+
+	UpdateCubeMapFacePassCBs();
 }
 
 //void MySoftRasterizationApp::UpdateObjectCBs(GameTime& gt)
@@ -1044,10 +1207,30 @@ void MySoftRasterizationApp::UpdateMaterialCBs(GameTime& gt)
 			XMStoreFloat4x4(&matData.MatTransform, XMMatrixTranspose(XMLoadFloat4x4(&mat->MatTransform)));
 			matData.DiffuseMapIndex = mat->DiffuseSrvHeapIndex;
 			matData.NormalMapIndex = mat->NormalSrvHeapIndex;
+			matData.CubeMapIndex = mat->CubeMapInex;
 
 			currMatSB->CopyData(mat->MatCBIndex, matData);
 			mat->NumFramesDirty--;
 		}
+	}
+}
+
+void MySoftRasterizationApp::UpdateCubeMapFacePassCBs()
+{
+	for (int i = 0; i < 6; ++i)
+	{
+		PassConstants cubeMapFacePassCB = mMainPassCB;
+
+		XMMATRIX view = mCubeMapCamera[i].GetView();
+		XMMATRIX proj = mCubeMapCamera[i].GetProj();
+		XMMATRIX viewProj = view * proj;
+
+		XMStoreFloat4x4(&cubeMapFacePassCB.ViewProj, XMMatrixTranspose(viewProj));
+
+		cubeMapFacePassCB.EyePosW = mCubeMapCamera[i].GetPosition3f();
+
+		auto currPassCB = mCurrFrameResource->PassCB.get();
+		currPassCB->CopyData(i + 1, cubeMapFacePassCB); // 从1开始存储，因为0是主渲染通道
 	}
 }
 

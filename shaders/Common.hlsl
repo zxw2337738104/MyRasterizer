@@ -20,7 +20,7 @@ struct MaterialData
     float4x4 MatTransform;
     uint DiffuseMapIndex;
     uint NormalMapIndex;
-    uint MatPad0;
+    uint CubeMapIndex;
     uint MatPad1;
 };
 
@@ -36,7 +36,7 @@ struct InstanceData
 
 // ËùÓĞÂş·´ÉäÌùÍ¼
 Texture2D gTextureMap[8] : register(t1);
-TextureCube gCubeMap : register(t9);
+TextureCube gCubeMap[2] : register(t9);
 //Texture2D gShadowMap : register(t2);
 //Texture2D gSsaoMap : register(t3);
 
