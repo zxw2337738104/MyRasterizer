@@ -21,7 +21,7 @@ VertexOut VS(uint vid : SV_VertexID)
     VertexOut vout = (VertexOut) 0.0f;
     
     vout.TexC = gTexCoords[vid];
-    vout.PosH = float4(vout.TexC * 2.0f - 1.0f, 0.0f, 1.0f);
+    vout.PosH = float4(vout.TexC.x * 2.0f - 1.0f, 1.0f - vout.TexC.y * 2.0f, 0.0f, 1.0f);
     
     return vout;
 }
