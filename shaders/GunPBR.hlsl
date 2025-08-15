@@ -76,21 +76,21 @@ float4 PS(VertexOut pin) : SV_Target
         clip(diffuseAlbedo.a - 0.1f);
 #endif
     
-    //¹Û²ì·½Ïò
+    //è§‚å¯Ÿæ–¹å‘
     float3 viewDir = normalize(gEyePosW - pin.PosW);
-    //¹âÔ´·½Ïò
+    //å…‰æºæ–¹å‘
     float3 lightDir = -gLights[0].Direction;
-    //¹âÔ´Ç¿¶È
+    //å…‰æºå¼ºåº¦
     float3 lightRadiance = gLights[0].Strength;
-    //°ë³ÌÏòÁ¿
+    //åŠç¨‹å‘é‡
     float3 halfVec = normalize(viewDir + lightDir);
-    //·¨ÏßÌùÍ¼µÄAÍ¨µÀ´æ´¢µÄ¹âÔó¶ÈÀ´¿ØÖÆ´Ö²Ú¶È
+    //æ³•çº¿è´´å›¾çš„Aé€šé“å­˜å‚¨çš„å…‰æ³½åº¦æ¥æ§åˆ¶ç²—ç³™åº¦
     gRoughness *= normalMapSample.a;
     
-    //1.Ö±½Ó¹â
-    //£¨Âş·´Éä + ¾µÃæ·´Éä£©* ¹âÔ´Ç¿¶È * LdotN
-    //Âş·´Éä = kd * c / PI£¬ÆäÖĞkd = (1 - ks)(1 - metallic)
-    //¾µÃæ·´Éä = DGF / (4 * VdotN * LdotN)
+    //1.ç›´æ¥å…‰
+    //ï¼ˆæ¼«åå°„ + é•œé¢åå°„ï¼‰* å…‰æºå¼ºåº¦ * LdotN
+    //æ¼«åå°„ = kd * c / PIï¼Œå…¶ä¸­kd = (1 - ks)(1 - metallic)
+    //é•œé¢åå°„ = DGF / (4 * VdotN * LdotN)
     
     float NdotL = max(dot(bumpedNormalW, lightDir), 0.0f);
     float NdotV = max(dot(bumpedNormalW, viewDir), 0.0f);
@@ -101,45 +101,52 @@ float4 PS(VertexOut pin) : SV_Target
     float D = NDFGGXApproximation(NdotH, gRoughness);
     float G = G_Smith(NdotL, NdotV, gRoughness);
     
-    //1.1 Ö±½Ó¹âµÄ¾µÃæ·´Éä
+    //1.1 ç›´æ¥å…‰çš„é•œé¢åå°„
     float3 specular = (D * F * G) / (4.0f * NdotV * NdotL + 0.01f);
     
-    //1.2 Ö±½Ó¹âµÄÂş·´Éä£¨Lambertian£©
+    //1.2 ç›´æ¥å…‰çš„æ¼«åå°„ï¼ˆLambertianï¼‰
     float3 kd = (1 - F) * (1 - metallic);
     float3 diffuse = kd * diffuseAlbedo.rgb / PI;
-    //disneyÂş·´Éä
+    //disneyæ¼«åå°„
 #ifdef Disney
-    float FD90 = 0.5f + 2 * VdotH * VdotH * roughness;
+    float FD90 = 0.5f + 2 * VdotH * VdotH * gRoughness;
     float FdV = 1 + (FD90 - 1) * pow(1 - NdotV, 5);
     float FdL = 1 + (FD90 - 1) * pow(1 - NdotL, 5);
     kd = FdV * FdL * (1 - metallic);
     diffuse = diffuseAlbedo.rgb * ((1 / PI) * kd);
 #endif
-    //1.3 Ö±½Ó¹âµÄ×ÜºÍ
+    //1.3 ç›´æ¥å…‰çš„æ€»å’Œ
     float3 litColor = (diffuse + specular) * lightRadiance * NdotL;
     
-    //2.¼ä½Ó¹â
+    //2.é—´æ¥å…‰
     
-    //2.1 ¼ä½Ó¹âÂş·´Éä
+    //2.1 é—´æ¥å…‰æ¼«åå°„
     float3 iblIrradiance = IBLDiffuseIrradiance(bumpedNormalW);
     float3 iblF = SchlickFresnelApproximation(gFresnelR0, NdotV);
     float3 iblKd = (1 - iblF) * (1 - metallic);
     float3 iblDiffuse = iblKd * iblIrradiance * diffuseAlbedo.rgb;
     
-    //2.2 ¼ä½Ó¹â¾µÃæ·´Éä
+    //2.2 é—´æ¥å…‰é•œé¢åå°„
     float3 r = reflect(-viewDir, bumpedNormalW);
     float maxLod = 8.0f;
     float3 iblSpecularIrradiance = gCubeMap[cubeMapIndex].SampleLevel(gsamAnisotropicWrap, r, gRoughness * maxLod).rgb;
     float2 lut = gBRDFLUT.Sample(gsamAnisotropicWrap, float2(NdotV, gRoughness)).rg;
     float3 iblSpecular = iblSpecularIrradiance * (iblF * lut.x + lut.y);
     
-    float ao = gTextureMap[12].Sample(gsamAnisotropicWrap, pin.TexC);
+    float3 iblSpecularBRDF = iblF * lut.x + lut.y;
+    float Ess = lut.x + lut.y;
+    float Ems = 1.0f - Ess;
+    float3 Favg = gFresnelR0 + (1.0f - gFresnelR0) / 21.0f;
+    float3 Fms = iblSpecularBRDF * Favg / (1.0f - (1.0f - Ess) * Favg + 0.0001f);
+    float3 Edss = 1.0f - (iblSpecularBRDF + Fms * Ems);
+    float3 kD = diffuseAlbedo.rgb * Edss;
+    float3 iblCombined = iblSpecularBRDF * iblSpecularIrradiance + (Fms * Ems + kD) * iblSpecularIrradiance;
     
-    //2.3 ¼ä½Ó¹âµÄ×ÜºÍ
-    litColor += (iblDiffuse + iblSpecular) * ao;
+    //2.3 é—´æ¥å…‰çš„æ€»å’Œ
+    litColor += iblDiffuse + iblCombined;
     
-    //3.×îÖÕÊä³ö
-    //É«µ÷Ó³Éä + Ù¤Âí½ÃÕı
+    //3.æœ€ç»ˆè¾“å‡º
+    //è‰²è°ƒæ˜ å°„ + ä¼½é©¬çŸ«æ­£
     litColor = litColor / (litColor + float3(1.0f, 1.0f, 1.0f));
     
     litColor = pow(litColor, 1.0f / 2.2f); // Gamma correction

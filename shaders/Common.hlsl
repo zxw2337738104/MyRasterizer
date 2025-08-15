@@ -34,7 +34,7 @@ struct InstanceData
     uint InstPad2;
 };
 
-// ËùÓĞÂş·´ÉäÌùÍ¼
+// æ‰€æœ‰æ¼«åå°„è´´å›¾
 Texture2D gTextureMap[13] : register(t1);
 TextureCube gCubeMap[2] : register(t14);
 Texture2D gShadowMap : register(t16);
@@ -44,7 +44,7 @@ Texture2D gBRDFLUT : register(t17);
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 StructuredBuffer<InstanceData> gInstanceData : register(t1, space1);
 
-// 6¸ö²»Í¬ÀàĞÍµÄ²ÉÑùÆ÷
+// 6ä¸ªä¸åŒç±»å‹çš„é‡‡æ ·å™¨
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
 SamplerState gsamLinearWrap : register(s2);
@@ -81,7 +81,7 @@ static float PI = 3.1415926;
 //cbuffer cbPerObject : register(b1)
 //{
 //    float4x4 gWorld;
-//    float4x4 gTexTransform; // UV¶¥µã±ä»»¾ØÕó
+//    float4x4 gTexTransform; // UVé¡¶ç‚¹å˜æ¢çŸ©é˜µ
 //    uint gMaterialIndex;
 //    uint gObjPad0;
 //    uint gObjPad1;
@@ -174,7 +174,7 @@ float NDFGGXApproximation(float NdotH, float roughness)
     return a2 / (PI * denom * denom);
 }
 
-//¼ÆËãÂş·´Éä·øÕÕ¶ÈÍ¼
+//è®¡ç®—æ¼«åå°„è¾ç…§åº¦å›¾
 float3 IBLDiffuseIrradiance(float3 normal)
 {
     float3 up = { 0.0f, 1.0f, 0.0f };
@@ -182,7 +182,7 @@ float3 IBLDiffuseIrradiance(float3 normal)
     up = cross(normal, right);
     
     float3 irradiance = 0.0f;
-    float sampleDelta = 0.35;
+    float sampleDelta = 0.35f;
     float nrSamples = 0.0f;
     for (float phi = 0.0f; phi < 2.0f * PI; phi += sampleDelta)
     {
@@ -190,7 +190,7 @@ float3 IBLDiffuseIrradiance(float3 normal)
         {
             float3 tangentSample = { sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta) };
             float3 sampleVec = normalize(tangentSample.x * right + tangentSample.y * up + tangentSample.z * normal);
-            irradiance += gCubeMap[0].Sample(gsamAnisotropicWrap, sampleVec).rgb;
+            irradiance += gCubeMap[0].Sample(gsamAnisotropicWrap, sampleVec).rgb * cos(theta) * sin(theta);
             nrSamples += 1.0f;
         }
     }
@@ -200,16 +200,16 @@ float3 IBLDiffuseIrradiance(float3 normal)
 }
 
 //------------------------------------------------------
-//  ¼ÆËã¾µÃæ·´Éä²¿·ÖµÄBRDFÏî
-//  ¹«Ê½£ºF0 * |BRDF(1 - k) * NdotL + |BRDF * k * NdotL
-//  ×¢ : |´ú±í»ı·Ö·ûºÅ
-//  ÆäÖĞ k = a * a * a * a * a,  a = (1 - NdotV)
-//  ÉÏÊö¹«Ê½¼ò»¯Îª F0 * A + B
+//  è®¡ç®—é•œé¢åå°„éƒ¨åˆ†çš„BRDFé¡¹
+//  å…¬å¼ï¼šF0 * |BRDF(1 - k) * NdotL + |BRDF * k * NdotL
+//  æ³¨ : |ä»£è¡¨ç§¯åˆ†ç¬¦å·
+//  å…¶ä¸­ k = a * a * a * a * a,  a = (1 - NdotV)
+//  ä¸Šè¿°å…¬å¼ç®€åŒ–ä¸º F0 * A + B
 //  A = |BRDF(1 - k) * NdotL,  B = |BRDF * k * NdotL
-//  ĞèÒª¼ÆËãµÄ¾ÍÊÇAºÍB
+//  éœ€è¦è®¡ç®—çš„å°±æ˜¯Aå’ŒB
 //-------------------------------------------------------
 
-//  »ñÈ¡µÍ²îÒìĞòÁĞ
+//  è·å–ä½å·®å¼‚åºåˆ—
 float RadicalInverse_VdC(uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);

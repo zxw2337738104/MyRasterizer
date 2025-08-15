@@ -38,12 +38,12 @@ ComPtr<ID3DBlob> CompileShader(
 
 struct Light
 {
-	XMFLOAT3 Strength = { 0.5f, 0.5f, 0.5f };//¹âÔ´ÑÕÉ«
-	float FalloffStart = 1.0f;//¿ªÊ¼Ë¥¼õ¾àÀë
-	XMFLOAT3 Direction = { 0.0f, -1.0f, 0.0f };//·½Ïò¹âºÍ¾Û¹âµÆµÄ·½ÏòÏòÁ¿
-	float FalloffEnd = 10.0f;//µã¹âÔ´ºÍ¾Û¹âµÆµÄË¥¼õ½áÊø¾àÀë
-	XMFLOAT3 Position = { 0.0f, 0.0f, 0.0f };//µã¹âºÍ¾Û¹âµÆµÄ×ø±ê
-	float SpotPower = 64.0f;//¾Û¹âÒò×ÓÖÐµÄ²ÎÊý
+	XMFLOAT3 Strength = { 0.5f, 0.5f, 0.5f };//ï¿½ï¿½Ô´ï¿½ï¿½É«
+	float FalloffStart = 1.0f;//ï¿½ï¿½Ê¼Ë¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	XMFLOAT3 Direction = { 0.0f, -1.0f, 0.0f };//ï¿½ï¿½ï¿½ï¿½ï¿½Í¾Û¹ï¿½ÆµÄ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	float FalloffEnd = 10.0f;//ï¿½ï¿½ï¿½Ô´ï¿½Í¾Û¹ï¿½Æµï¿½Ë¥ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	XMFLOAT3 Position = { 0.0f, 0.0f, 0.0f };//ï¿½ï¿½ï¿½Í¾Û¹ï¿½Æµï¿½ï¿½ï¿½ï¿½ï¿½
+	float SpotPower = 64.0f;//ï¿½Û¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÐµÄ²ï¿½ï¿½ï¿½
 };
 
 struct Material
@@ -58,7 +58,7 @@ struct Material
 	XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
 	float Roughness = 0.25;
 	XMFLOAT4X4 MatTransform = MathHelper::Identity4x4();
-	float metallic = 0.0f; // ½ðÊô¶È
+	float metallic = 0.0f; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 };
 
 struct MaterialConstants
@@ -101,7 +101,7 @@ public:
 	int LineNumber = -1;
 };
 
-//L#xÊÇÒ»¸ö×Ö·û´®»¯²Ù×÷·û£¬½«x×ª»¯Îª¿í×Ö·û´®³£Á¿
+//L#xï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½x×ªï¿½ï¿½Îªï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 #ifndef ThrowIfFailed
 #define ThrowIfFailed(x)                                              \
 {                                                                     \

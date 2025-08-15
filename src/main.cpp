@@ -259,6 +259,8 @@ private:
 
 	std::unique_ptr<BRDF> mBRDFLUT = nullptr;
 	bool GetLut = false;
+
+	bool mIsKullaContyPBR = false; // 是否使用 Kulla Conty PBR 模型
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nShowCmd)
@@ -578,6 +580,9 @@ void MySoftRasterizationApp::BuildShadersAndInputLayout()
 	mShaders["gunVS"] = CompileShader(L"shaders\\GunPBR.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["gunPS"] = CompileShader(L"shaders\\GunPBR.hlsl", nullptr, "PS", "ps_5_1");
 
+	mShaders["KullaContyPBRVS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["KullaContyPBRPS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "PS", "ps_5_1");
+
 	mInputLayout = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -667,6 +672,11 @@ void MySoftRasterizationApp::BuildPSOs()
 	gunPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["gunVS"]->GetBufferPointer()), mShaders["gunVS"]->GetBufferSize() };
 	gunPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["gunPS"]->GetBufferPointer()), mShaders["gunPS"]->GetBufferSize() };
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&gunPsoDesc, IID_PPV_ARGS(&mPSOs["gun"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC kullaContyPBRPsoDesc = opaquePsoDesc;
+	kullaContyPBRPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRVS"]->GetBufferPointer()), mShaders["KullaContyPBRVS"]->GetBufferSize() };
+	kullaContyPBRPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRPS"]->GetBufferPointer()), mShaders["KullaContyPBRPS"]->GetBufferSize() };
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&kullaContyPBRPsoDesc, IID_PPV_ARGS(&mPSOs["KullaContyPBR"])));
 }
 
 void MySoftRasterizationApp::BuildFrameResources()
@@ -1257,8 +1267,14 @@ void MySoftRasterizationApp::Draw()
 	auto passCB = mCurrFrameResource->PassCB->Resource();
 	mCommandList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
 
-	mCommandList->SetPipelineState(mPSOs["pbr"].Get());
-	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+	if (mIsKullaContyPBR) {
+		mCommandList->SetPipelineState(mPSOs["KullaContyPBR"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+	}
+	else {
+		mCommandList->SetPipelineState(mPSOs["pbr"].Get());
+		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+	}
 
 	mCommandList->SetPipelineState(mPSOs["gun"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::GUN]);
@@ -1419,6 +1435,7 @@ void MySoftRasterizationApp::Update(GameTime& gt)
 
 	// 示例 ImGui 窗口
 	ImGui::Begin("Debug Window");
+	ImGui::Checkbox("Is Kulla Conty PBR", &mIsKullaContyPBR);
 	//ImGui::SliderInt("Light Count", &mLightsCount, 1, 3);
 	ImGui::End();
 
