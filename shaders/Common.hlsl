@@ -39,6 +39,8 @@ Texture2D gTextureMap[13] : register(t1);
 TextureCube gCubeMap[2] : register(t14);
 Texture2D gShadowMap : register(t16);
 Texture2D gBRDFLUT : register(t17);
+Texture2D gBRDFLUT_Eu : register(t18);
+Texture2D gLUT_Eavg : register(t19); // Eavg LUT
 //Texture2D gSsaoMap : register(t3);
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
@@ -77,6 +79,8 @@ cbuffer cbPass : register(b0)
 };
 
 static float PI = 3.1415926;
+
+static const uint SAMPLE_COUNT = 512u;
 
 //cbuffer cbPerObject : register(b1)
 //{
@@ -246,9 +250,10 @@ float2 IntegrateBRDF(float NdotV, float roughness)
     float3 V = { sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV };
     float A = 0.0f, B = 0.0f;
     
+    roughness = lerp(0.04f, 1.0f, roughness); // 确保粗糙度在合理范围内
+    
     float3 N = float3(0.0f, 0.0f, 1.0f);
     
-    const uint SAMPLE_COUNT = 1024u;
     for (uint i = 0u; i < SAMPLE_COUNT; ++i)
     {
         float2 Xi = Hammersley(i, SAMPLE_COUNT);
@@ -272,4 +277,55 @@ float2 IntegrateBRDF(float NdotV, float roughness)
     A /= float(SAMPLE_COUNT);
     B /= float(SAMPLE_COUNT);
     return float2(A, B);
+}
+
+float4 IntegrateBRDF_Eu(float NdotV, float roughness)
+{
+    float3 V = { sqrt(1.0f - NdotV * NdotV), 0.0f, NdotV };
+    float E = 0.0f;
+    
+    float3 N = float3(0.0f, 0.0f, 1.0f);
+    
+    roughness = lerp(0.04f, 1.0f, roughness); // 确保粗糙度在合理范围内
+    
+    for (uint i = 0u; i < SAMPLE_COUNT; ++i)
+    {
+        float2 Xi = Hammersley(i, SAMPLE_COUNT);
+        float3 H = ImportanceSampleGGX(Xi, N, roughness);
+        float3 L = normalize(2.0f * dot(V, H) * H - V);
+        
+        float NdotL = max(L.z, 0.0f);
+        float NdotH = max(H.z, 0.0f);
+        float VdotH = max(dot(V, H), 0.0f);
+        
+        if (NdotL > 0.0f)
+        {
+            float G = G_Smith(NdotL, NdotV, roughness);
+            float G_Vis = (G * VdotH) / (NdotH * NdotV + 0.0001f);
+            E += G_Vis;
+        }
+    }
+    E /= float(SAMPLE_COUNT);
+    return float4(E, E, E, 1.0f);
+}
+
+float4 CalcEavg(float roughness)
+{
+    float E_avg = 0.0f;
+    roughness = lerp(0.04f, 1.0f, roughness); // 确保粗糙度在合理范围内
+    for (uint i = 0u; i < SAMPLE_COUNT; ++i)
+    {
+        float NdotV = (float(i) + 0.5f) / float(SAMPLE_COUNT);
+        float E = gBRDFLUT_Eu.Sample(gsamLinearClamp, float2(NdotV, roughness)).r;
+        E_avg += E * NdotV;
+    }
+    E_avg *= 2.0f * (1.0f / float(SAMPLE_COUNT));
+    return float4(E_avg, E_avg, E_avg, 1.0f);
+}
+
+float3 AverageFresnel(float3 r, float3 g)
+{
+    return float3(0.087237f, 0.087237f, 0.087237f) + 0.0230685 * g - 0.0864902 * g * g + 0.0774594 * g * g * g
+           + 0.782654 * r - 0.136432 * r * r + 0.278708 * r * r * r
+           + 0.19744 * g * r + 0.0360605 * g * g * r - 0.2586 * g * r * r;
 }

@@ -58,12 +58,12 @@ float4 PS(VertexOut pin) : SV_Target
     MaterialData matData = gMaterialData[pin.MatIndex];
     
     float4 diffuseAlbedo = matData.DiffuseAlbedo;
-    float gRoughness = gTextureMap[10].Sample(gsamAnisotropicWrap, pin.TexC);
+    float gRoughness = gTextureMap[10].Sample(gsamAnisotropicWrap, pin.TexC).r;
     float3 gFresnelR0 = matData.FresnelR0;
     uint diffuseTexIndex = matData.DiffuseMapIndex;
     uint normalTexIndex = matData.NormalMapIndex;
     uint cubeMapIndex = matData.CubeMapIndex;
-    float metallic = gTextureMap[11].Sample(gsamAnisotropicWrap, pin.TexC);
+    float metallic = gTextureMap[11].Sample(gsamAnisotropicWrap, pin.TexC).r;
     
     pin.NormalW = normalize(pin.NormalW);
     
@@ -133,17 +133,8 @@ float4 PS(VertexOut pin) : SV_Target
     float2 lut = gBRDFLUT.Sample(gsamAnisotropicWrap, float2(NdotV, gRoughness)).rg;
     float3 iblSpecular = iblSpecularIrradiance * (iblF * lut.x + lut.y);
     
-    float3 iblSpecularBRDF = iblF * lut.x + lut.y;
-    float Ess = lut.x + lut.y;
-    float Ems = 1.0f - Ess;
-    float3 Favg = gFresnelR0 + (1.0f - gFresnelR0) / 21.0f;
-    float3 Fms = iblSpecularBRDF * Favg / (1.0f - (1.0f - Ess) * Favg + 0.0001f);
-    float3 Edss = 1.0f - (iblSpecularBRDF + Fms * Ems);
-    float3 kD = diffuseAlbedo.rgb * Edss;
-    float3 iblCombined = iblSpecularBRDF * iblSpecularIrradiance + (Fms * Ems + kD) * iblSpecularIrradiance;
-    
     //2.3 间接光的总和
-    litColor += iblDiffuse + iblCombined;
+    litColor += iblDiffuse + iblSpecular;
     
     //3.最终输出
     //色调映射 + 伽马矫正

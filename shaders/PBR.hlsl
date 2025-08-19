@@ -97,7 +97,7 @@ float4 PS(VertexOut pin) : SV_Target
     float NdotH = max(dot(bumpedNormalW, halfVec), 0.0f);
     float VdotH = max(dot(viewDir, halfVec), 0.0f);
     gFresnelR0 = lerp(gFresnelR0, diffuseAlbedo.rgb, metallic);
-    float3 F = SchlickFresnelApproximation(gFresnelR0, NdotV);
+    float3 F = SchlickFresnelApproximation(gFresnelR0, VdotH);
     float D = NDFGGXApproximation(NdotH, gRoughness);
     float G = G_Smith(NdotL, NdotV, gRoughness);
     
@@ -116,7 +116,7 @@ float4 PS(VertexOut pin) : SV_Target
     diffuse = diffuseAlbedo.rgb * ((1 / PI) * kd);
 #endif
     //1.3 直接光的总和
-    float3 litColor = (diffuse + specular) * lightRadiance * NdotL;
+    float3 litColor = (specular) * lightRadiance * NdotL;
     
     //2.间接光
     

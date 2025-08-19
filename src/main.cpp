@@ -32,6 +32,14 @@ enum class RenderLayer
 	Count
 };
 
+enum class PBRShadingMode
+{
+	PBR = 0,
+	KullaContyPBR,
+};
+
+static PBRShadingMode mPBRShadingMode = PBRShadingMode::PBR;
+
 struct RenderItem
 {
 	RenderItem() = default;
@@ -195,6 +203,8 @@ private:
 	void DrawSceneToCubeMap();
 	void DrawSceneToShadowMap();
 	void DrawSceneToBRDFLUT();
+	void DrawSceneToBRDFLUT_Eu();
+	void DrawSceneToLUT_Eavg();
 
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
@@ -236,6 +246,8 @@ private:
 	UINT mDynamicSrvIndex = 0;
 	UINT mShadowMapSrvIndex = 0;
 	UINT mBRDFLUTSrvIndex = 0;
+	UINT mBRDFLUT_EuSrvIndex = 0;
+	UINT mLUT_EavgSrvIndex = 0;
 
 	std::unique_ptr<CubeRenderTarget> mDynamicCubeMap = nullptr;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE mCubeDSV;
@@ -259,7 +271,12 @@ private:
 
 	std::unique_ptr<BRDF> mBRDFLUT = nullptr;
 	bool GetLut = false;
+	std::unique_ptr<BRDF> mBRDFLUT_Eu = nullptr;
+	bool GetLut_Eu = false;
+	std::unique_ptr<BRDF> mLUT_Eavg = nullptr;
+	bool GetLut_Eavg = false;
 
+	bool mIsKullaContyStylePBR = false; // 是否使用 Kulla Conty Style PBR 模型
 	bool mIsKullaContyPBR = false; // 是否使用 Kulla Conty PBR 模型
 };
 
@@ -307,6 +324,10 @@ bool MySoftRasterizationApp::Init()
 
 	mBRDFLUT = std::make_unique<BRDF>(md3dDevice.Get(), 512, 512);
 
+	mBRDFLUT_Eu = std::make_unique<BRDF>(md3dDevice.Get(), 512, 512);
+
+	mLUT_Eavg = std::make_unique<BRDF>(md3dDevice.Get(), 512, 512);
+
 	LoadModels("Models/Cyborg_Weapon.fbx");
 
 	LoadTextures();
@@ -335,7 +356,7 @@ bool MySoftRasterizationApp::Init()
 void MySoftRasterizationApp::CreateDescriptorHeap()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + 6 + 1; // 6 for the cube map faces
+	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + 6 + 1 + 2; // 6 for the cube map faces
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&mRtvHeap)));
@@ -357,7 +378,7 @@ void MySoftRasterizationApp::CreateDescriptorHeap()
 void MySoftRasterizationApp::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 18; // Adjust as needed
+	srvHeapDesc.NumDescriptors = 20; // Adjust as needed
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -450,6 +471,20 @@ void MySoftRasterizationApp::BuildDescriptorHeaps()
 		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mBRDFLUTSrvIndex, mCbv_srv_uavDescriptorSize),
 		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mBRDFLUTSrvIndex, mCbv_srv_uavDescriptorSize)
 	);
+
+	mBRDFLUT_EuSrvIndex = mBRDFLUTSrvIndex + 1;
+	mBRDFLUT_Eu->BuildDescriptors(
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(mRtvHeap->GetCPUDescriptorHandleForHeapStart(), 9, mRtvDescriptorSize),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mBRDFLUT_EuSrvIndex, mCbv_srv_uavDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mBRDFLUT_EuSrvIndex, mCbv_srv_uavDescriptorSize)
+	);
+
+	mLUT_EavgSrvIndex = mBRDFLUT_EuSrvIndex + 1;
+	mLUT_Eavg->BuildDescriptors(
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(mRtvHeap->GetCPUDescriptorHandleForHeapStart(), 10, mRtvDescriptorSize),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mLUT_EavgSrvIndex, mCbv_srv_uavDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mLUT_EavgSrvIndex, mCbv_srv_uavDescriptorSize)
+	);
 }
 
 void MySoftRasterizationApp::BuildCubeDepthStencil()
@@ -535,7 +570,7 @@ void MySoftRasterizationApp::BuildRootSignature()
 	//MaterialSB
 	rootParameters[3].InitAsShaderResourceView(0, 1);
 	//SRV for Textures
-	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 17, 1));
+	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 19, 1));
 	auto staticSamplers = GetStaticSamplers();
 
 	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(5, rootParameters, 
@@ -579,6 +614,12 @@ void MySoftRasterizationApp::BuildShadersAndInputLayout()
 
 	mShaders["gunVS"] = CompileShader(L"shaders\\GunPBR.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["gunPS"] = CompileShader(L"shaders\\GunPBR.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["brdfEuVS"] = CompileShader(L"shaders\\BRDF_LUT_Eu.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["brdfEuPS"] = CompileShader(L"shaders\\BRDF_LUT_Eu.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["EavgVS"] = CompileShader(L"shaders\\LUT_Eavg.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["EavgPS"] = CompileShader(L"shaders\\LUT_Eavg.hlsl", nullptr, "PS", "ps_5_1");
 
 	mShaders["KullaContyPBRVS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["KullaContyPBRPS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "PS", "ps_5_1");
@@ -673,10 +714,24 @@ void MySoftRasterizationApp::BuildPSOs()
 	gunPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["gunPS"]->GetBufferPointer()), mShaders["gunPS"]->GetBufferSize() };
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&gunPsoDesc, IID_PPV_ARGS(&mPSOs["gun"])));
 
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC kullaContyPBRPsoDesc = opaquePsoDesc;
-	kullaContyPBRPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRVS"]->GetBufferPointer()), mShaders["KullaContyPBRVS"]->GetBufferSize() };
-	kullaContyPBRPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRPS"]->GetBufferPointer()), mShaders["KullaContyPBRPS"]->GetBufferSize() };
-	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&kullaContyPBRPsoDesc, IID_PPV_ARGS(&mPSOs["KullaContyPBR"])));
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC brdfEuPsoDesc = opaquePsoDesc;
+	brdfEuPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["brdfEuVS"]->GetBufferPointer()), mShaders["brdfEuVS"]->GetBufferSize() };
+	brdfEuPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["brdfEuPS"]->GetBufferPointer()), mShaders["brdfEuPS"]->GetBufferSize() };
+	brdfEuPsoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT; // BRDF Euclidean LUT format
+	brdfEuPsoDesc.DepthStencilState.DepthEnable = false;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&brdfEuPsoDesc, IID_PPV_ARGS(&mPSOs["brdfEu"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC eavgPsoDesc = opaquePsoDesc;
+	eavgPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["EavgVS"]->GetBufferPointer()), mShaders["EavgVS"]->GetBufferSize() };
+	eavgPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["EavgPS"]->GetBufferPointer()), mShaders["EavgPS"]->GetBufferSize() };
+	eavgPsoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT; // Eavg LUT format
+	eavgPsoDesc.DepthStencilState.DepthEnable = false;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&eavgPsoDesc, IID_PPV_ARGS(&mPSOs["Eavg"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC kullaContyPsoDesc = opaquePsoDesc;
+	kullaContyPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRVS"]->GetBufferPointer()), mShaders["KullaContyPBRVS"]->GetBufferSize() };
+	kullaContyPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRPS"]->GetBufferPointer()), mShaders["KullaContyPBRPS"]->GetBufferSize() };
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&kullaContyPsoDesc, IID_PPV_ARGS(&mPSOs["KullaContyPBR"])));
 }
 
 void MySoftRasterizationApp::BuildFrameResources()
@@ -933,8 +988,8 @@ void MySoftRasterizationApp::BuildMaterial()
 			pbr->NormalSrvHeapIndex = 5;
 			pbr->DiffuseAlbedo = XMFLOAT4(0.9f, 0.9f, 0.9f, 1.0f);
 			pbr->FresnelR0 = XMFLOAT3(0.04f, 0.04f, 0.04f);
-			pbr->Roughness = 0.2f * j;
-			pbr->metallic = 0.2f * i;
+			pbr->Roughness = 0.18f * j + 0.04f;
+			pbr->metallic = 0.18f * i + 0.04f;
 
 			mMaterials[pbr->Name] = std::move(pbr);
 		}
@@ -1220,6 +1275,48 @@ void MySoftRasterizationApp::DrawSceneToBRDFLUT()
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
 }
 
+void MySoftRasterizationApp::DrawSceneToBRDFLUT_Eu()
+{
+	mCommandList->RSSetViewports(1, &mBRDFLUT_Eu->ViewPort());
+	mCommandList->RSSetScissorRects(1, &mBRDFLUT_Eu->ScissorRect());
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mBRDFLUT_Eu->Resource(),
+		D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	mCommandList->ClearRenderTargetView(mBRDFLUT_Eu->Rtv(), Colors::Black, 0, nullptr);
+	mCommandList->OMSetRenderTargets(1, &mBRDFLUT_Eu->Rtv(), false, nullptr);
+	mCommandList->SetPipelineState(mPSOs["brdfEu"].Get());
+
+	mCommandList->IASetVertexBuffers(0, 1, nullptr);
+	mCommandList->IASetIndexBuffer(nullptr);
+	mCommandList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	mCommandList->DrawInstanced(6, 1, 0, 0);
+
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mBRDFLUT_Eu->Resource(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
+}
+
+void MySoftRasterizationApp::DrawSceneToLUT_Eavg()
+{
+	mCommandList->RSSetViewports(1, &mLUT_Eavg->ViewPort());
+	mCommandList->RSSetScissorRects(1, &mLUT_Eavg->ScissorRect());
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mLUT_Eavg->Resource(),
+		D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	mCommandList->ClearRenderTargetView(mLUT_Eavg->Rtv(), Colors::Black, 0, nullptr);
+	mCommandList->OMSetRenderTargets(1, &mLUT_Eavg->Rtv(), false, nullptr);
+	mCommandList->SetPipelineState(mPSOs["Eavg"].Get());
+
+	mCommandList->IASetVertexBuffers(0, 1, nullptr);
+	mCommandList->IASetIndexBuffer(nullptr);
+	mCommandList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	mCommandList->DrawInstanced(6, 1, 0, 0);
+
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mLUT_Eavg->Resource(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
+}
+
 void MySoftRasterizationApp::Draw()
 {
 	// Reuse the memory associated with command recording.
@@ -1249,6 +1346,18 @@ void MySoftRasterizationApp::Draw()
 		GetLut = true;
 	}
 
+	if (!GetLut_Eu)
+	{
+		DrawSceneToBRDFLUT_Eu();
+		GetLut_Eu = true;
+	}
+
+	if (!GetLut_Eavg)
+	{
+		DrawSceneToLUT_Eavg();
+		GetLut_Eavg = true;
+	}
+
 	// Indicate a state transition on the resource usage.
 	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
@@ -1267,14 +1376,17 @@ void MySoftRasterizationApp::Draw()
 	auto passCB = mCurrFrameResource->PassCB->Resource();
 	mCommandList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
 
-	if (mIsKullaContyPBR) {
-		mCommandList->SetPipelineState(mPSOs["KullaContyPBR"].Get());
-		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
-	}
-	else {
+	switch (mPBRShadingMode)
+	{
+	case PBRShadingMode::PBR:
 		mCommandList->SetPipelineState(mPSOs["pbr"].Get());
-		DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
+		break;
+	case PBRShadingMode::KullaContyPBR:
+		mCommandList->SetPipelineState(mPSOs["KullaContyPBR"].Get());
+		break;
 	}
+
+	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Opaque]);
 
 	mCommandList->SetPipelineState(mPSOs["gun"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::GUN]);
@@ -1435,7 +1547,10 @@ void MySoftRasterizationApp::Update(GameTime& gt)
 
 	// 示例 ImGui 窗口
 	ImGui::Begin("Debug Window");
-	ImGui::Checkbox("Is Kulla Conty PBR", &mIsKullaContyPBR);
+	if (ImGui::RadioButton("PBR", mPBRShadingMode == PBRShadingMode::PBR))
+		mPBRShadingMode = PBRShadingMode::PBR;
+	if (ImGui::RadioButton("KullaContyPBR", mPBRShadingMode == PBRShadingMode::KullaContyPBR))
+		mPBRShadingMode = PBRShadingMode::KullaContyPBR;
 	//ImGui::SliderInt("Light Count", &mLightsCount, 1, 3);
 	ImGui::End();
 

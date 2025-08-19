@@ -97,26 +97,29 @@ float4 PS(VertexOut pin) : SV_Target
     float NdotH = max(dot(bumpedNormalW, halfVec), 0.0f);
     float VdotH = max(dot(viewDir, halfVec), 0.0f);
     gFresnelR0 = lerp(gFresnelR0, diffuseAlbedo.rgb, metallic);
-    float3 F = SchlickFresnelApproximation(gFresnelR0, NdotV);
+    float3 F = SchlickFresnelApproximation(gFresnelR0, VdotH);
     float D = NDFGGXApproximation(NdotH, gRoughness);
     float G = G_Smith(NdotL, NdotV, gRoughness);
     
-    //1.1 直接光的镜面反射
-    float3 specular = (D * F * G) / (4.0f * NdotV * NdotL + 0.01f);
+    float E_avg = gLUT_Eavg.Sample(gsamLinearClamp, float2(0.5f, gRoughness)).r;
+    float E_v = gBRDFLUT_Eu.Sample(gsamLinearClamp, float2(NdotV, gRoughness)).r;
+    float E_l = gBRDFLUT_Eu.Sample(gsamLinearClamp, float2(NdotL, gRoughness)).r;
     
-    //1.2 直接光的漫反射（Lambertian）
-    float3 kd = (1 - F) * (1 - metallic);
-    float3 diffuse = kd * diffuseAlbedo.rgb / PI;
-    //disney漫反射
-#ifdef Disney
-    float FD90 = 0.5f + 2 * VdotH * VdotH * gRoughness;
-    float FdV = 1 + (FD90 - 1) * pow(1 - NdotV, 5);
-    float FdL = 1 + (FD90 - 1) * pow(1 - NdotL, 5);
-    kd = FdV * FdL * (1 - metallic);
-    diffuse = diffuseAlbedo.rgb * ((1 / PI) * kd);
-#endif
+    float3 edgetint = float3(0.827f, 0.792f, 0.678f);
+    float3 F_avg = AverageFresnel(pow(diffuseAlbedo.rgb, float(2.2f)), edgetint);
+    
+    //1.1 直接光的镜面反射
+    float3 specular = (D * F * G) / (4.0f * NdotV * NdotL + 0.001f);
+    
+    //使用多重散射代替原有漫反射
+    float mutiscatter_numerator = (1.0f - E_v) * (1.0f - E_l);
+    float mutiscatter_denominator = PI * (1.0 - E_avg + 0.0001f);
+    float3 mutiscatter = (diffuseAlbedo.rgb * mutiscatter_numerator) / mutiscatter_denominator;
+    
+    float3 F_add = F_avg * E_avg / (1.0f - F_avg * (1.0f - E_avg) + 0.0001f);
+    
     //1.3 直接光的总和
-    float3 litColor = (diffuse + specular) * lightRadiance * NdotL;
+    float3 litColor = (mutiscatter * F_add + specular) * lightRadiance * NdotL;
     
     //2.间接光
     
@@ -124,25 +127,19 @@ float4 PS(VertexOut pin) : SV_Target
     float3 iblIrradiance = IBLDiffuseIrradiance(bumpedNormalW);
     float3 iblF = SchlickFresnelApproximation(gFresnelR0, NdotV);
     float3 iblKd = (1 - iblF) * (1 - metallic);
+    //float3 iblKd_ms = (1.0f - E_v) * (1.0f - metallic);
     float3 iblDiffuse = iblKd * iblIrradiance * diffuseAlbedo.rgb;
     
     //2.2 间接光镜面反射
     float3 r = reflect(-viewDir, bumpedNormalW);
     float maxLod = 8.0f;
     float3 iblSpecularIrradiance = gCubeMap[cubeMapIndex].SampleLevel(gsamAnisotropicWrap, r, gRoughness * maxLod).rgb;
-    float2 lut = gBRDFLUT.Sample(gsamAnisotropicWrap, float2(NdotV, gRoughness)).rg;
+    float2 lut = gBRDFLUT.Sample(gsamLinearClamp, float2(NdotV, gRoughness)).rg;
     float3 iblSpecularBRDF = iblF * lut.x + lut.y;
-    
-    float Ess = lut.x + lut.y;
-    float Ems = 1.0f - Ess;
-    float3 Favg = gFresnelR0 + (1.0f - gFresnelR0) / 21.0f;
-    float3 Fms = iblSpecularBRDF * Favg / (1.0f - (1.0f - Ess) * Favg + 0.0001f);
-    float3 Edss = 1.0f - (iblSpecularBRDF + Fms * Ems);
-    float3 kD = diffuseAlbedo.rgb * Edss;
-    float3 iblCombined = iblSpecularBRDF * iblSpecularIrradiance + (Fms * Ems + kD) * iblSpecularIrradiance;
+    float3 iblSpecular = iblSpecularIrradiance * iblSpecularBRDF;
     
     //2.3 间接光的总和
-    litColor += iblDiffuse + iblCombined;
+    litColor += iblDiffuse + iblSpecular;
     
     //3.最终输出
     //色调映射 + 伽马矫正
