@@ -7,6 +7,7 @@
 #include "CubeRenderTarget.h"
 #include "ShadowMap.h"
 #include "BRDF_LUT.h"
+#include "Ssao.h"
 #include "../utils/DDSTextureLoader.h"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -168,6 +169,7 @@ private:
 	virtual void Draw() override;
 	void BuildDescriptorHeaps();
 	void BuildRootSignature();
+	void BuildSsaoRootSignature();
 	void BuildShadersAndInputLayout();
 	void BuildPSOs();
 	void BuildFrameResources();
@@ -195,6 +197,7 @@ private:
 	void UpdateCubeMapFacePassCBs();
 	void UpdateShadowTransform();
 	void UpdateShadowPassCBs();
+	void UpdateSsaoCBs();
 
 	virtual void CreateDescriptorHeap() override;
 
@@ -205,8 +208,10 @@ private:
 	void DrawSceneToBRDFLUT();
 	void DrawSceneToBRDFLUT_Eu();
 	void DrawSceneToLUT_Eavg();
+	void DrawNormalsAndDepth();
 
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
+	ComPtr<ID3D12RootSignature> mSsaoRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 	ComPtr<ID3D12Resource> mCubeDepthStencilBuffer = nullptr;
 
@@ -248,6 +253,7 @@ private:
 	UINT mBRDFLUTSrvIndex = 0;
 	UINT mBRDFLUT_EuSrvIndex = 0;
 	UINT mLUT_EavgSrvIndex = 0;
+	UINT mSsaoSrvIndex = 0;
 
 	std::unique_ptr<CubeRenderTarget> mDynamicCubeMap = nullptr;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE mCubeDSV;
@@ -276,8 +282,11 @@ private:
 	std::unique_ptr<BRDF> mLUT_Eavg = nullptr;
 	bool GetLut_Eavg = false;
 
-	bool mIsKullaContyStylePBR = false; // 是否使用 Kulla Conty Style PBR 模型
 	bool mIsKullaContyPBR = false; // 是否使用 Kulla Conty PBR 模型
+
+	UINT mAOType = 0;
+
+	std::unique_ptr<Ssao> mSsao = nullptr;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nShowCmd)
@@ -328,10 +337,14 @@ bool MySoftRasterizationApp::Init()
 
 	mLUT_Eavg = std::make_unique<BRDF>(md3dDevice.Get(), 512, 512);
 
+	mSsao = std::make_unique<Ssao>(md3dDevice.Get(), 
+		mCommandList.Get(), mClientWidth, mClientHeight);
+
 	LoadModels("Models/Cyborg_Weapon.fbx");
 
 	LoadTextures();
 	BuildRootSignature();
+	BuildSsaoRootSignature();
 	BuildDescriptorHeaps();
 	BuildShadersAndInputLayout();
 	BuildGeometry();
@@ -341,6 +354,11 @@ bool MySoftRasterizationApp::Init()
 	BuildFrameResources();
 	BuildCubeDepthStencil();
 	BuildPSOs();
+
+	mSsao->SetPSOs(
+		mPSOs["ssao"].Get(),
+		mPSOs["ssaoBlur"].Get()
+	);
 
 	ThrowIfFailed(mCommandList->Close());
 	// Execute the initialization commands
@@ -356,7 +374,7 @@ bool MySoftRasterizationApp::Init()
 void MySoftRasterizationApp::CreateDescriptorHeap()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + 6 + 1 + 2; // 6 for the cube map faces
+	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + 6 + 1 + 2 + 3; // 6 for the cube map faces
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&mRtvHeap)));
@@ -378,7 +396,7 @@ void MySoftRasterizationApp::CreateDescriptorHeap()
 void MySoftRasterizationApp::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 20; // Adjust as needed
+	srvHeapDesc.NumDescriptors = 25; // Adjust as needed
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -411,7 +429,7 @@ void MySoftRasterizationApp::BuildDescriptorHeaps()
 		mTextures["weaponRoughnessMap"]->Resource,
 		mTextures["weaponMetallicMap"]->Resource,
 		mTextures["weaponAOMap"]->Resource
-	};
+	};//13
 
 	auto skyCubeMap = mTextures["skyCubeMap"]->Resource;
 
@@ -485,6 +503,15 @@ void MySoftRasterizationApp::BuildDescriptorHeaps()
 		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mLUT_EavgSrvIndex, mCbv_srv_uavDescriptorSize),
 		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mLUT_EavgSrvIndex, mCbv_srv_uavDescriptorSize)
 	);
+
+	mSsaoSrvIndex = mLUT_EavgSrvIndex + 1;
+	mSsao->BuildDescriptors(
+		mDepthStencilBuffer.Get(),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mSsaoSrvIndex, mCbv_srv_uavDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mSsaoSrvIndex, mCbv_srv_uavDescriptorSize),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(mRtvHeap->GetCPUDescriptorHandleForHeapStart(), 11, mRtvDescriptorSize),
+		mCbv_srv_uavDescriptorSize,
+		mRtvDescriptorSize);
 }
 
 void MySoftRasterizationApp::BuildCubeDepthStencil()
@@ -570,7 +597,7 @@ void MySoftRasterizationApp::BuildRootSignature()
 	//MaterialSB
 	rootParameters[3].InitAsShaderResourceView(0, 1);
 	//SRV for Textures
-	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 19, 1));
+	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 1));
 	auto staticSamplers = GetStaticSamplers();
 
 	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(5, rootParameters, 
@@ -582,6 +609,81 @@ void MySoftRasterizationApp::BuildRootSignature()
 		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf()));
 	ThrowIfFailed(md3dDevice->CreateRootSignature(0, serializedRootSig->GetBufferPointer(),
 		serializedRootSig->GetBufferSize(), IID_PPV_ARGS(&mRootSignature)));
+}
+
+void MySoftRasterizationApp::BuildSsaoRootSignature()
+{
+	CD3DX12_DESCRIPTOR_RANGE texTable0;
+	texTable0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0);
+
+	CD3DX12_DESCRIPTOR_RANGE texTable1;
+	texTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2);
+
+	CD3DX12_ROOT_PARAMETER slotRootParameters[4];
+
+	slotRootParameters[0].InitAsConstantBufferView(0); // SsaoPassCB
+	slotRootParameters[1].InitAsConstants(1, 1);
+	slotRootParameters[2].InitAsDescriptorTable(1, &texTable0); // NormalMap and DepthMap
+	slotRootParameters[3].InitAsDescriptorTable(1, &texTable1); // RandomVectorMap or NoiseMap
+
+	const CD3DX12_STATIC_SAMPLER_DESC pointClamp(
+		0, // ShaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_POINT, // Filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // AddressW
+	const CD3DX12_STATIC_SAMPLER_DESC linearClamp(
+		1, // ShaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR, // Filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // AddressW
+	const CD3DX12_STATIC_SAMPLER_DESC depthMapSam(
+		2,
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER, // AddressU
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER, // AddressV
+		D3D12_TEXTURE_ADDRESS_MODE_BORDER, // AddressW
+		0.0f, // MipLODBias
+		0, // MaxAnisotropy
+		D3D12_COMPARISON_FUNC_LESS_EQUAL, // ComparisonFunc
+		D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE // BorderColor
+	);
+	const CD3DX12_STATIC_SAMPLER_DESC linearWrap(
+		3, // ShaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR, // Filter
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressU
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressV
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP); // AddressW
+
+	std::array<CD3DX12_STATIC_SAMPLER_DESC, 4> staticSamplers = {
+		pointClamp,
+		linearClamp,
+		depthMapSam,
+		linearWrap
+	};
+
+	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(4, slotRootParameters,
+		(UINT)staticSamplers.size(), staticSamplers.data(),
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	ComPtr<ID3DBlob> serializedRootSig = nullptr;
+	ComPtr<ID3DBlob> errorBlob = nullptr;
+	HRESULT hr = D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+
+	if (errorBlob != nullptr)
+	{
+		::OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+	}
+	ThrowIfFailed(hr);
+
+	ThrowIfFailed(md3dDevice->CreateRootSignature(
+		0, 
+		serializedRootSig->GetBufferPointer(),
+		serializedRootSig->GetBufferSize(), 
+		IID_PPV_ARGS(mSsaoRootSignature.GetAddressOf())
+	));
 }
 
 void MySoftRasterizationApp::BuildShadersAndInputLayout()
@@ -623,6 +725,15 @@ void MySoftRasterizationApp::BuildShadersAndInputLayout()
 
 	mShaders["KullaContyPBRVS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["KullaContyPBRPS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["drawNormalsVS"] = CompileShader(L"shaders\\DrawNormals.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["drawNormalsPS"] = CompileShader(L"shaders\\DrawNormals.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["ssaoVS"] = CompileShader(L"shaders\\Ssao.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["ssaoPS"] = CompileShader(L"shaders\\Ssao.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["ssaoBlurVS"] = CompileShader(L"shaders\\SsaoBlur.hlsl", nullptr, "VS", "vs_5_1");	
+	mShaders["ssaoBlurPS"] = CompileShader(L"shaders\\SsaoBlur.hlsl", nullptr, "PS", "ps_5_1");
 
 	mInputLayout = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -732,6 +843,34 @@ void MySoftRasterizationApp::BuildPSOs()
 	kullaContyPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRVS"]->GetBufferPointer()), mShaders["KullaContyPBRVS"]->GetBufferSize() };
 	kullaContyPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRPS"]->GetBufferPointer()), mShaders["KullaContyPBRPS"]->GetBufferSize() };
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&kullaContyPsoDesc, IID_PPV_ARGS(&mPSOs["KullaContyPBR"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC drawNormalsPsoDesc = opaquePsoDesc;
+	drawNormalsPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["drawNormalsVS"]->GetBufferPointer()), mShaders["drawNormalsVS"]->GetBufferSize() };
+	drawNormalsPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["drawNormalsPS"]->GetBufferPointer()), mShaders["drawNormalsPS"]->GetBufferSize() };
+	drawNormalsPsoDesc.RTVFormats[0] = Ssao::NormalMapFormat; // Normal map format
+	drawNormalsPsoDesc.SampleDesc.Count = 1;
+	drawNormalsPsoDesc.SampleDesc.Quality = 0;
+	drawNormalsPsoDesc.DSVFormat = mDepthStencilFormat;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&drawNormalsPsoDesc, IID_PPV_ARGS(&mPSOs["drawNormals"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC ssaoPsoDesc = opaquePsoDesc;
+	ssaoPsoDesc.InputLayout = { nullptr, 0 }; // SSAO does not use input layout
+	ssaoPsoDesc.pRootSignature = mSsaoRootSignature.Get();
+	ssaoPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["ssaoVS"]->GetBufferPointer()), mShaders["ssaoVS"]->GetBufferSize() };
+	ssaoPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["ssaoPS"]->GetBufferPointer()), mShaders["ssaoPS"]->GetBufferSize() };
+
+	ssaoPsoDesc.DepthStencilState.DepthEnable = false;
+	ssaoPsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; // Disable depth writes for SSAO pass
+	ssaoPsoDesc.RTVFormats[0] = Ssao::AmbientMapFormat;
+	ssaoPsoDesc.SampleDesc.Count = 1;
+	ssaoPsoDesc.SampleDesc.Quality = 0;
+	ssaoPsoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&ssaoPsoDesc, IID_PPV_ARGS(&mPSOs["ssao"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC ssaoBlurPsoDesc = ssaoPsoDesc;
+	ssaoBlurPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["ssaoBlurVS"]->GetBufferPointer()), mShaders["ssaoBlurVS"]->GetBufferSize() };
+	ssaoBlurPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["ssaoBlurPS"]->GetBufferPointer()), mShaders["ssaoBlurPS"]->GetBufferSize() };
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&ssaoBlurPsoDesc, IID_PPV_ARGS(&mPSOs["ssaoBlur"])));
 }
 
 void MySoftRasterizationApp::BuildFrameResources()
@@ -1317,6 +1456,33 @@ void MySoftRasterizationApp::DrawSceneToLUT_Eavg()
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
 }
 
+void MySoftRasterizationApp::DrawNormalsAndDepth()
+{
+	mCommandList->RSSetViewports(1, &viewPort);
+	mCommandList->RSSetScissorRects(1, &scissorRect);
+
+	auto normalMap = mSsao->NormalMap();
+	auto normalMapRtv = mSsao->NormalMapRtv();
+
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(normalMap,
+		D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+	float clearValue[4] = { 0.0f, 0.0f, 1.0f, 0.0f };
+	mCommandList->ClearRenderTargetView(normalMapRtv, clearValue, 0, nullptr);
+	mCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+	mCommandList->OMSetRenderTargets(1, &normalMapRtv, true, &DepthStencilView());
+	
+	auto passCB = mCurrFrameResource->PassCB->Resource();
+	mCommandList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
+
+	mCommandList->SetPipelineState(mPSOs["drawNormals"].Get());
+
+	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::GUN]);
+
+	mCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(normalMap,
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
+}
+
 void MySoftRasterizationApp::Draw()
 {
 	// Reuse the memory associated with command recording.
@@ -1337,6 +1503,19 @@ void MySoftRasterizationApp::Draw()
 	mCommandList->SetGraphicsRootShaderResourceView(3, matSB->GetGPUVirtualAddress());
 
 	CD3DX12_GPU_DESCRIPTOR_HANDLE texDescriptor(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), 1, mCbv_srv_uavDescriptorSize);
+	mCommandList->SetGraphicsRootDescriptorTable(4, texDescriptor);
+
+	DrawNormalsAndDepth();
+
+	mCommandList->SetGraphicsRootSignature(mSsaoRootSignature.Get());
+	mSsao->ComputeSsao(mCommandList.Get(), mCurrFrameResource, 3);
+
+	//-------------------------------------------------------------------------
+	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
+
+	matSB = mCurrFrameResource->MatSB->Resource();
+	mCommandList->SetGraphicsRootShaderResourceView(3, matSB->GetGPUVirtualAddress());
+
 	mCommandList->SetGraphicsRootDescriptorTable(4, texDescriptor);
 
 	if (!GetLut)
@@ -1390,6 +1569,9 @@ void MySoftRasterizationApp::Draw()
 
 	mCommandList->SetPipelineState(mPSOs["gun"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::GUN]);
+
+	mCommandList->SetPipelineState(mPSOs["debug"].Get());
+	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Debug]);
 
 	mCommandList->SetPipelineState(mPSOs["sky"].Get());
 	DrawRenderItems(mCommandList.Get(), mRitemLayer[(int)RenderLayer::Sky]);
@@ -1547,11 +1729,27 @@ void MySoftRasterizationApp::Update(GameTime& gt)
 
 	// 示例 ImGui 窗口
 	ImGui::Begin("Debug Window");
-	if (ImGui::RadioButton("PBR", mPBRShadingMode == PBRShadingMode::PBR))
-		mPBRShadingMode = PBRShadingMode::PBR;
-	if (ImGui::RadioButton("KullaContyPBR", mPBRShadingMode == PBRShadingMode::KullaContyPBR))
-		mPBRShadingMode = PBRShadingMode::KullaContyPBR;
-	//ImGui::SliderInt("Light Count", &mLightsCount, 1, 3);
+
+	// --- PBR 模式 ---
+	if (ImGui::CollapsingHeader("Spheres' Shading Mode"))
+	{
+		if (ImGui::RadioButton("PBR", mPBRShadingMode == PBRShadingMode::PBR))
+			mPBRShadingMode = PBRShadingMode::PBR;
+		if (ImGui::RadioButton("KullaContyPBR", mPBRShadingMode == PBRShadingMode::KullaContyPBR))
+			mPBRShadingMode = PBRShadingMode::KullaContyPBR;
+	}
+
+	// --- AO 模式 ---
+	if (ImGui::CollapsingHeader("GUN's Ambient Occlusion"))
+	{
+		if (ImGui::RadioButton("NoAO", mAOType == 0))
+			mAOType = 0;
+		if (ImGui::RadioButton("SSAO", mAOType == 1))
+			mAOType = 1;
+		if (ImGui::RadioButton("AOMap", mAOType == 2))
+			mAOType = 2;
+	}
+
 	ImGui::End();
 
 	//UpdateCamera(gt);
@@ -1584,6 +1782,7 @@ void MySoftRasterizationApp::Update(GameTime& gt)
 	UpdateShadowTransform();
 	UpdateMainPassCBs();
 	UpdateShadowPassCBs();
+	UpdateSsaoCBs();
 	// 渲染 ImGui
 	ImGui::Render();
 }
@@ -1689,10 +1888,17 @@ void MySoftRasterizationApp::UpdateInstanceBuffers(GameTime& gt)
 		e->InstanceBufferIndex = instanceIndex;
 		for (UINT i = 0; i < (UINT)instanceData.size(); ++i)
 		{
+			XMMATRIX world = XMLoadFloat4x4(&instanceData[i].World);
+
+			XMMATRIX invWorld = XMMatrixInverse(&XMMatrixDeterminant(world), world);
+			XMMATRIX invTpsWorld = XMMatrixTranspose(invWorld);
+
 			InstanceData data;
 			XMStoreFloat4x4(&data.World, XMMatrixTranspose(XMLoadFloat4x4(&instanceData[i].World)));
+			XMStoreFloat4x4(&data.InvTpsWorld, invTpsWorld);
 			XMStoreFloat4x4(&data.TexTransform, XMMatrixTranspose(XMLoadFloat4x4(&instanceData[i].TexTransform)));
 			data.MaterialIndex = instanceData[i].MaterialIndex;
+			data.AOType = mAOType;
 
 			currInstanceBuffer->CopyData(instanceIndex++, data);
 		}
@@ -1802,6 +2008,41 @@ void MySoftRasterizationApp::UpdateShadowPassCBs()
 
 	auto currPassCB = mCurrFrameResource->PassCB.get();
 	currPassCB->CopyData(7, mShadowMapPassCB);
+}
+
+void MySoftRasterizationApp::UpdateSsaoCBs()
+{
+	SsaoConstants ssaoCB;
+
+	XMMATRIX P = mCamera.GetProj();
+
+	XMMATRIX T(
+		0.5f, 0.0f, 0.0f, 0.0f,
+		0.0f, -0.5f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f,
+		0.5f, 0.5f, 0.0f, 1.0f
+	);
+
+	ssaoCB.Proj = mMainPassCB.Proj;
+	ssaoCB.InvProj = mMainPassCB.InvProj;
+	XMStoreFloat4x4(&ssaoCB.ProjTex, XMMatrixTranspose(P * T));
+
+	mSsao->GetOffsetVectors(ssaoCB.OffsetVectors);
+
+	auto blurWeights = mSsao->CalcGaussWeights(2.5f);
+	ssaoCB.BlurWeights[0] = XMFLOAT4(&blurWeights[0]);
+	ssaoCB.BlurWeights[1] = XMFLOAT4(&blurWeights[4]);
+	ssaoCB.BlurWeights[2] = XMFLOAT4(&blurWeights[8]);
+
+	ssaoCB.InvRenderTargetSize = XMFLOAT2(1.0f / mSsao->SsaoMapWidth(), 1.0f / mSsao->SsaoMapHeight());
+
+	ssaoCB.OcclusionRadius = 0.5f;
+	ssaoCB.OcclusionFadeStart = 0.2f;
+	ssaoCB.OcclusionFadeEnd = 0.4f;
+	ssaoCB.SurfaceEpsilon = 0.01f;
+
+	auto currSsaoCB = mCurrFrameResource->SsaoCB.get();
+	currSsaoCB->CopyData(0, ssaoCB);
 }
 
 void MySoftRasterizationApp::OnKeyboardInput(GameTime& gt)

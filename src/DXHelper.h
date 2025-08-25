@@ -38,12 +38,12 @@ ComPtr<ID3DBlob> CompileShader(
 
 struct Light
 {
-	XMFLOAT3 Strength = { 0.5f, 0.5f, 0.5f };//��Դ��ɫ
-	float FalloffStart = 1.0f;//��ʼ˥������
-	XMFLOAT3 Direction = { 0.0f, -1.0f, 0.0f };//�����;۹�Ƶķ�������
-	float FalloffEnd = 10.0f;//���Դ�;۹�Ƶ�˥����������
-	XMFLOAT3 Position = { 0.0f, 0.0f, 0.0f };//���;۹�Ƶ�����
-	float SpotPower = 64.0f;//�۹������еĲ���
+	XMFLOAT3 Strength = { 0.5f, 0.5f, 0.5f };
+	float FalloffStart = 1.0f;
+	XMFLOAT3 Direction = { 0.0f, -1.0f, 0.0f };
+	float FalloffEnd = 10.0f;
+	XMFLOAT3 Position = { 0.0f, 0.0f, 0.0f };
+	float SpotPower = 64.0f;
 };
 
 struct Material
@@ -58,7 +58,7 @@ struct Material
 	XMFLOAT3 FresnelR0 = { 0.01f, 0.01f, 0.01f };
 	float Roughness = 0.25;
 	XMFLOAT4X4 MatTransform = MathHelper::Identity4x4();
-	float metallic = 0.0f; // ������
+	float metallic = 0.0f;
 };
 
 struct MaterialConstants

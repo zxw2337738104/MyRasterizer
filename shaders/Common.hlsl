@@ -27,9 +27,10 @@ struct MaterialData
 struct InstanceData
 {
     float4x4 World;
+    float4x4 InvTpsWorld;
     float4x4 TexTransform;
     uint MaterialIndex;
-    uint InstPad0;
+    uint AOType;
     uint InstPad1;
     uint InstPad2;
 };
@@ -41,7 +42,7 @@ Texture2D gShadowMap : register(t16);
 Texture2D gBRDFLUT : register(t17);
 Texture2D gBRDFLUT_Eu : register(t18);
 Texture2D gLUT_Eavg : register(t19); // Eavg LUT
-//Texture2D gSsaoMap : register(t3);
+Texture2D gSsaoMap : register(t20);
 
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 StructuredBuffer<InstanceData> gInstanceData : register(t1, space1);

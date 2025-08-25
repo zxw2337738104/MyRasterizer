@@ -27,10 +27,11 @@ struct ObjectConstants {
 struct InstanceData
 {
 	XMFLOAT4X4 World = MathHelper::Identity4x4();
+	XMFLOAT4X4 InvTpsWorld = MathHelper::Identity4x4();
 	XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
 
 	UINT MaterialIndex = 0;
-	UINT InstancePad0;
+	UINT AOType = 0;
 	UINT InstancePad1;
 	UINT InstancePad2;
 };
@@ -54,6 +55,23 @@ struct PassConstants {
 	XMFLOAT4X4 ShadowTransform = MathHelper::Identity4x4();
 	XMFLOAT4 AmbientLight = { 0.0f, 0.0f, 0.0f, 1.0f };
 	Light Lights[MaxLights];
+};
+
+struct SsaoConstants
+{
+	XMFLOAT4X4 Proj = MathHelper::Identity4x4();
+	XMFLOAT4X4 InvProj = MathHelper::Identity4x4();
+	XMFLOAT4X4 ProjTex = MathHelper::Identity4x4();
+	XMFLOAT4 OffsetVectors[14]; // SSAOÆ«ÒÆÏòÁ¿
+
+	XMFLOAT4 BlurWeights[3];
+
+	XMFLOAT2 InvRenderTargetSize = { 0.0f, 0.0f };
+
+	float OcclusionRadius = 0.2f; // SSAO°ë¾¶
+	float OcclusionFadeStart = 0.1f;
+	float OcclusionFadeEnd = 0.4f;
+	float SurfaceEpsilon = 0.01f;
 };
 
 struct MaterialData
@@ -81,7 +99,7 @@ public:
 	//std::unique_ptr<UploadBufferResource<ObjectConstants>> ObjectCB = nullptr;
 	std::unique_ptr<UploadBufferResource<InstanceData>> InstanceBuffer = nullptr;
 	std::unique_ptr<UploadBufferResource<PassConstants>> PassCB = nullptr;
-	//std::unique_ptr<UploadBufferResource<SsaoConstants>> SsaoCB = nullptr;
+	std::unique_ptr<UploadBufferResource<SsaoConstants>> SsaoCB = nullptr;
 	std::unique_ptr<UploadBufferResource<MaterialData>> MatSB = nullptr;
 	//std::unique_ptr<UploadBufferResource<SkinnedConstants>> SkinnedCB = nullptr;
 

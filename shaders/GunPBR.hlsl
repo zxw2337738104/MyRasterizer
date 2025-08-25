@@ -19,6 +19,7 @@ struct VertexOut
     float2 TexC : TEXCOORD;
     
     nointerpolation uint MatIndex : MATINDEX;
+    nointerpolation uint AOType : AOTYPE;
 };
 
 VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
@@ -33,6 +34,7 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     MaterialData matData = gMaterialData[gMaterialIndex];
     
     vout.MatIndex = gMaterialIndex;
+    vout.AOType = instData.AOType;
     
     float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
     vout.PosW = posW.xyz;
@@ -133,7 +135,16 @@ float4 PS(VertexOut pin) : SV_Target
     float2 lut = gBRDFLUT.Sample(gsamLinearClamp, float2(NdotV, gRoughness)).rg;
     float3 iblSpecular = iblSpecularIrradiance * (iblF * lut.x + lut.y);
     
-    float3 ao = gTextureMap[12].Sample(gsamAnisotropicWrap, pin.TexC).rgb; // Ambient Occlusion
+    float3 ao = float3(1.0f, 1.0f, 1.0f);
+    if (pin.AOType == 1)
+    {
+        pin.SsaoPosH /= pin.SsaoPosH.w; // Convert to NDC space
+        ao = gSsaoMap.Sample(gsamLinearClamp, pin.SsaoPosH.xy, 0.0f).rrr;
+    }else if(pin.AOType == 2)
+    {
+        ao = gTextureMap[12].Sample(gsamAnisotropicWrap, pin.TexC).rgb;
+    }
+    
     //2.3 间接光的总和
     litColor += (iblDiffuse + iblSpecular) * ao;
     

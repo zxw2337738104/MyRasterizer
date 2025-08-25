@@ -101,9 +101,9 @@ float4 PS(VertexOut pin) : SV_Target
     float D = NDFGGXApproximation(NdotH, gRoughness);
     float G = G_Smith(NdotL, NdotV, gRoughness);
     
-    float E_avg = gLUT_Eavg.Sample(gsamLinearClamp, float2(0.5f, gRoughness)).r;
-    float E_v = gBRDFLUT_Eu.Sample(gsamLinearClamp, float2(NdotV, gRoughness)).r;
-    float E_l = gBRDFLUT_Eu.Sample(gsamLinearClamp, float2(NdotL, gRoughness)).r;
+    float3 E_avg = gLUT_Eavg.Sample(gsamLinearClamp, float2(0.5f, gRoughness)).rgb;
+    float3 E_v = gBRDFLUT_Eu.Sample(gsamLinearClamp, float2(NdotV, gRoughness)).rgb;
+    float3 E_l = gBRDFLUT_Eu.Sample(gsamLinearClamp, float2(NdotL, gRoughness)).rgb;
     
     float3 edgetint = float3(0.827f, 0.792f, 0.678f);
     float3 F_avg = AverageFresnel(pow(diffuseAlbedo.rgb, float(2.2f)), edgetint);
@@ -112,8 +112,8 @@ float4 PS(VertexOut pin) : SV_Target
     float3 specular = (D * F * G) / (4.0f * NdotV * NdotL + 0.001f);
     
     //使用多重散射代替原有漫反射
-    float mutiscatter_numerator = (1.0f - E_v) * (1.0f - E_l);
-    float mutiscatter_denominator = PI * (1.0 - E_avg + 0.0001f);
+    float3 mutiscatter_numerator = (1.0f - E_v) * (1.0f - E_l);
+    float3 mutiscatter_denominator = PI * (1.0f - E_avg + 0.0001f);
     float3 mutiscatter = (diffuseAlbedo.rgb * mutiscatter_numerator) / mutiscatter_denominator;
     
     float3 F_add = F_avg * E_avg / (1.0f - F_avg * (1.0f - E_avg) + 0.0001f);

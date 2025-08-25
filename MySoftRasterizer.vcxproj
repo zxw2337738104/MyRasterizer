@@ -150,6 +150,7 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClCompile Include="src\GeometryGenerator.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\ShadowMap.cpp" />
+    <ClCompile Include="src\Ssao.cpp" />
     <ClCompile Include="utils\DDSTextureLoader.cpp" />
     <ClCompile Include="utils\MathHelper.cpp" />
   </ItemGroup>
@@ -173,6 +174,7 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClInclude Include="src\GeometryGenerator.h" />
     <ClInclude Include="src\MeshGeometry.hpp" />
     <ClInclude Include="src\ShadowMap.h" />
+    <ClInclude Include="src\Ssao.h" />
     <ClInclude Include="src\UploadBufferResource.h" />
     <ClInclude Include="utils\d3dx12.h" />
     <ClInclude Include="utils\DDSTextureLoader.h" />
