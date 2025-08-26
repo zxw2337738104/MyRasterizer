@@ -114,7 +114,7 @@ float4 PS(VertexOut pin) : SV_Target
     float FD90 = 0.5f + 2 * VdotH * VdotH * gRoughness;
     float FdV = 1 + (FD90 - 1) * pow(1 - NdotV, 5);
     float FdL = 1 + (FD90 - 1) * pow(1 - NdotL, 5);
-    kd = FdV * FdL * (1 - metallic);
+    kd = FdV * FdL * (1 - metallic); 
     diffuse = diffuseAlbedo.rgb * ((1 / PI) * kd);
 #endif
     //1.3 直接光的总和

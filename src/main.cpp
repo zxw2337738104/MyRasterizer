@@ -1716,7 +1716,15 @@ void MySoftRasterizationApp::OnResize()
 {
 	D3D12App::OnResize();
 
-	mCamera.SetLens(0.25 * MathHelper::Pi, AspectRatio(), 1.0f, 1000.0f);
+	if (mSsao != nullptr)
+	{
+		mSsao->OnResize(mClientWidth, mClientHeight);
+
+		// Resources changed, so need to rebuild descriptors.
+		mSsao->RebuildDescriptors(mDepthStencilBuffer.Get());
+	}
+
+	mCamera.SetLens(0.25 * MathHelper::Pi, AspectRatio(), 0.1f, 1000.0f);
 }
 
 void MySoftRasterizationApp::Update(GameTime& gt)
