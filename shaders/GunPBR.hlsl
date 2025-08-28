@@ -150,9 +150,9 @@ float4 PS(VertexOut pin) : SV_Target
     
     //3.最终输出
     //色调映射 + 伽马矫正
-    litColor = litColor / (litColor + float3(1.0f, 1.0f, 1.0f));
+    //litColor = litColor / (litColor + float3(1.0f, 1.0f, 1.0f));
     
-    litColor = pow(litColor, 1.0f / 2.2f); // Gamma correction
+    //litColor = pow(litColor, 1.0f / 2.2f); // Gamma correction
     
     return float4(litColor, diffuseAlbedo.a);
 }

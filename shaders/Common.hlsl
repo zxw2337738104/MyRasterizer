@@ -47,7 +47,7 @@ Texture2D gSsaoMap : register(t20);
 StructuredBuffer<MaterialData> gMaterialData : register(t0, space1);
 StructuredBuffer<InstanceData> gInstanceData : register(t1, space1);
 
-// 6个不同类型的采样器
+// 7个不同类型的采样器
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
 SamplerState gsamLinearWrap : register(s2);

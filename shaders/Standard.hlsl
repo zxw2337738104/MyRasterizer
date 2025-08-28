@@ -104,5 +104,5 @@ float4 PS(VertexOut pin) : SV_Target
     
     litColor.a = diffuseAlbedo.a * 0.4f;
 	
-    return litColor;
+    return float4(1.0f, 0.0f, 1.0f, 1.0f);
 }

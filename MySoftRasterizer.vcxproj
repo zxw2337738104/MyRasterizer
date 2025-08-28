@@ -140,6 +140,7 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClCompile Include="ImGui\imgui_impl_win32.cpp" />
     <ClCompile Include="ImGui\imgui_tables.cpp" />
     <ClCompile Include="ImGui\imgui_widgets.cpp" />
+    <ClCompile Include="src\BlurFilter.cpp" />
     <ClCompile Include="src\BRDF_LUT.cpp" />
     <ClCompile Include="src\Camera.cpp" />
     <ClCompile Include="src\CubeRenderTarget.cpp" />
@@ -149,6 +150,7 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClCompile Include="src\GameTime.cpp" />
     <ClCompile Include="src\GeometryGenerator.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\OffScreenRenderTarget.cpp" />
     <ClCompile Include="src\ShadowMap.cpp" />
     <ClCompile Include="src\Ssao.cpp" />
     <ClCompile Include="utils\DDSTextureLoader.cpp" />
@@ -163,6 +165,7 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClInclude Include="ImGui\imstb_rectpack.h" />
     <ClInclude Include="ImGui\imstb_textedit.h" />
     <ClInclude Include="ImGui\imstb_truetype.h" />
+    <ClInclude Include="src\BlurFilter.h" />
     <ClInclude Include="src\BRDF_LUT.h" />
     <ClInclude Include="src\Camera.h" />
     <ClInclude Include="src\CreateDefaultBuffer.h" />
@@ -173,6 +176,7 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClInclude Include="src\GameTime.h" />
     <ClInclude Include="src\GeometryGenerator.h" />
     <ClInclude Include="src\MeshGeometry.hpp" />
+    <ClInclude Include="src\OffScreenRenderTarget.h" />
     <ClInclude Include="src\ShadowMap.h" />
     <ClInclude Include="src\Ssao.h" />
     <ClInclude Include="src\UploadBufferResource.h" />
