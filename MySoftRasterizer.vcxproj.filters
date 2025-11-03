@@ -78,10 +78,10 @@
     <ClCompile Include="src\OffScreenRenderTarget.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\PCSS.cpp">
+    <ClCompile Include="src\GBuffers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\PBR.cpp">
+    <ClCompile Include="src\DefferedShading.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -162,6 +162,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\OffScreenRenderTarget.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\GBuffers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
