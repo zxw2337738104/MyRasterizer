@@ -145,7 +145,6 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClCompile Include="src\Camera.cpp" />
     <ClCompile Include="src\CubeRenderTarget.cpp" />
     <ClCompile Include="src\D3D12App.cpp" />
-    <ClCompile Include="src\DefferedShading.cpp" />
     <ClCompile Include="src\DXHelper.cpp" />
     <ClCompile Include="src\FrameResource.cpp" />
     <ClCompile Include="src\GameTime.cpp" />
@@ -153,6 +152,7 @@ Copy /Y /V $(SolutionDir)ThirdParty\lib\assimp-vc143-mtd.lib $(OutDirFullPath)</
     <ClCompile Include="src\GeometryGenerator.cpp" />
     <ClCompile Include="src\HiZBuffer.cpp" />
     <ClCompile Include="src\OffScreenRenderTarget.cpp" />
+    <ClCompile Include="src\PBR.cpp" />
     <ClCompile Include="src\SceneColorRT.cpp" />
     <ClCompile Include="src\ShadowMap.cpp" />
     <ClCompile Include="src\Ssao.cpp" />

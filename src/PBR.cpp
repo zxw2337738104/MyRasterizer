@@ -40,6 +40,7 @@ enum class PBRShadingMode
 {
 	PBR = 0,
 	KullaContyPBR,
+	CookTorrancePBR,
 };
 
 static PBRShadingMode mPBRShadingMode = PBRShadingMode::PBR;
@@ -185,7 +186,8 @@ private:
 	void DrawFullScreenQuad(ID3D12GraphicsCommandList* cmdList);
 	void DrawBasePass(ID3D12GraphicsCommandList* cmdList);
 	void DrawBrightPass(ID3D12GraphicsCommandList* cmdList);
-	void DrawCompositePass(ID3D12GraphicsCommandList* cmdList);
+	void DrawCompositePass(ID3D12GraphicsCommandList* cmdList, bool mEnableBloom);
+	void DrawWithoutBloom(ID3D12GraphicsCommandList* cmdList);
 
 	std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> GetStaticSamplers();
 
@@ -297,6 +299,7 @@ private:
 	bool mIsKullaContyPBR = false; // 是否使用 Kulla Conty PBR 模型
 
 	UINT mAOType = 0;
+	bool mEnableBloom = true;
 
 	std::unique_ptr<Ssao> mSsao = nullptr;
 	std::unique_ptr<OffScreenRenderTarget> mOffScreenRT = nullptr;
@@ -419,7 +422,7 @@ void MyRasterizerApp::CreateDescriptorHeap()
 void MyRasterizerApp::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 31; // Adjust as needed
+	srvHeapDesc.NumDescriptors = 33; // Adjust as needed
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -451,8 +454,10 @@ void MyRasterizerApp::BuildDescriptorHeaps()
 		mTextures["weaponNormalMap"]->Resource,
 		mTextures["weaponRoughnessMap"]->Resource,
 		mTextures["weaponMetallicMap"]->Resource,
-		mTextures["weaponAOMap"]->Resource
-	};//13
+		mTextures["weaponAOMap"]->Resource,
+		mTextures["caveDiffuseMap"]->Resource,
+		mTextures["caveNormalMap"]->Resource
+	};//15
 
 	auto skyCubeMap = mTextures["skyCubeMap"]->Resource;
 
@@ -634,7 +639,7 @@ void MyRasterizerApp::BuildRootSignature()
 	//MaterialSB
 	rootParameters[3].InitAsShaderResourceView(0, 1);
 	//SRV for Textures
-	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 1));
+	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 22, 1));
 	auto staticSamplers = GetStaticSamplers();
 
 	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(5, rootParameters, 
@@ -730,13 +735,14 @@ void MyRasterizerApp::BuildBloomRootSignature()
 	CD3DX12_DESCRIPTOR_RANGE texTable1;
 	texTable1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1);
 
-	CD3DX12_ROOT_PARAMETER slotRootParameter[2];
+	CD3DX12_ROOT_PARAMETER slotRootParameter[3];
 	slotRootParameter[0].InitAsDescriptorTable(1, &texTable0, D3D12_SHADER_VISIBILITY_PIXEL);
 	slotRootParameter[1].InitAsDescriptorTable(1, &texTable1, D3D12_SHADER_VISIBILITY_PIXEL);
+	slotRootParameter[2].InitAsConstants(1, 0);
 
 	auto staticSamplers = GetStaticSamplers();
 
-	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(2, slotRootParameter,
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(3, slotRootParameter,
 		(UINT)staticSamplers.size(), staticSamplers.data(),
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
@@ -834,6 +840,9 @@ void MyRasterizerApp::BuildShadersAndInputLayout()
 
 	mShaders["KullaContyPBRVS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["KullaContyPBRPS"] = CompileShader(L"shaders\\Kulla_ContyPBR.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["CookTorrancePBRVS"] = CompileShader(L"shaders\\CookTorrancePBR.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["CookTorrancePBRPS"] = CompileShader(L"shaders\\CookTorrancePBR.hlsl", nullptr, "PS", "ps_5_1");
 
 	mShaders["drawNormalsVS"] = CompileShader(L"shaders\\DrawNormals.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["drawNormalsPS"] = CompileShader(L"shaders\\DrawNormals.hlsl", nullptr, "PS", "ps_5_1");
@@ -961,6 +970,11 @@ void MyRasterizerApp::BuildPSOs()
 	kullaContyPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRVS"]->GetBufferPointer()), mShaders["KullaContyPBRVS"]->GetBufferSize() };
 	kullaContyPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["KullaContyPBRPS"]->GetBufferPointer()), mShaders["KullaContyPBRPS"]->GetBufferSize() };
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&kullaContyPsoDesc, IID_PPV_ARGS(&mPSOs["KullaContyPBR"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC cookTorrancePsoDesc = opaquePsoDesc;
+	cookTorrancePsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["CookTorrancePBRVS"]->GetBufferPointer()), mShaders["CookTorrancePBRVS"]->GetBufferSize() };
+	cookTorrancePsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["CookTorrancePBRPS"]->GetBufferPointer()), mShaders["CookTorrancePBRPS"]->GetBufferSize() };
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&cookTorrancePsoDesc, IID_PPV_ARGS(&mPSOs["CookTorrancePBR"])));
 
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC drawNormalsPsoDesc = opaquePsoDesc;
 	drawNormalsPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["drawNormalsVS"]->GetBufferPointer()), mShaders["drawNormalsVS"]->GetBufferSize() };
@@ -1458,8 +1472,11 @@ void MyRasterizerApp::BuildRenderItems()
 	bloomRitem->StartIndexLocation = bloomRitem->Geo->DrawArgs["sphere"].StartIndexLocation;
 	bloomRitem->BaseVertexLocation = bloomRitem->Geo->DrawArgs["sphere"].BaseVertexLocation;
 	bloomRitem->InstanceCount = 0;
-	bloomRitem->Instances.resize(1);
-	XMStoreFloat4x4(&bloomRitem->Instances[0].World, XMMatrixScaling(0.3f, 0.3f, 0.3f) * XMMatrixTranslation(-3.0f, 2.0f, -5.0f));
+	bloomRitem->Instances.resize(3);
+	for (int i = 0; i < 3; ++i)
+	{
+		XMStoreFloat4x4(&bloomRitem->Instances[i].World, XMMatrixScaling(0.3f, 0.3f, 0.3f) * XMMatrixTranslation(-3.0f + i * 1.0f, 2.0f, -5.0f));
+	}
 	bloomRitem->Instances[0].TexTransform = MathHelper::Identity4x4();
 	bloomRitem->Instances[0].MaterialIndex = 2; // Assuming bloom material is at index 0
 	mRitemLayer[(int)RenderLayer::Bloom].push_back(bloomRitem.get());
@@ -1692,6 +1709,9 @@ void MyRasterizerApp::DrawBasePass(ID3D12GraphicsCommandList* cmdList)
 	case PBRShadingMode::KullaContyPBR:
 		cmdList->SetPipelineState(mPSOs["KullaContyPBR"].Get());
 		break;
+	case PBRShadingMode::CookTorrancePBR:
+		cmdList->SetPipelineState(mPSOs["CookTorrancePBR"].Get());
+		break;
 	}
 
 	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::Opaque]);
@@ -1725,10 +1745,13 @@ void MyRasterizerApp::DrawBrightPass(ID3D12GraphicsCommandList* cmdList)
 	DrawFullScreenQuad(cmdList);
 }
 
-void MyRasterizerApp::DrawCompositePass(ID3D12GraphicsCommandList* cmdList)
+void MyRasterizerApp::DrawCompositePass(ID3D12GraphicsCommandList* cmdList, bool enableBloom)
 {
 	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+	cmdList->RSSetViewports(1, &viewPort);
+	cmdList->RSSetScissorRects(1, &scissorRect);
 
 	cmdList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
 	cmdList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
@@ -1738,11 +1761,75 @@ void MyRasterizerApp::DrawCompositePass(ID3D12GraphicsCommandList* cmdList)
 	cmdList->SetGraphicsRootDescriptorTable(0, mOffScreenRT->BasePassSrv());
 	cmdList->SetGraphicsRootDescriptorTable(1, mBlurFilter->Srv());
 
+	// 传递Bloom开关参数
+	int bloomEnabled = enableBloom ? 1 : 0;
+	cmdList->SetGraphicsRoot32BitConstant(2, bloomEnabled, 0);
+
 	DrawFullScreenQuad(cmdList);
 
+	// 切换回主Root Signature绘制Debug和ImGui
 	cmdList->SetGraphicsRootSignature(mRootSignature.Get());
+
+	auto matSB = mCurrFrameResource->MatSB->Resource();
+	cmdList->SetGraphicsRootShaderResourceView(3, matSB->GetGPUVirtualAddress());
+	CD3DX12_GPU_DESCRIPTOR_HANDLE texDescriptor(mSrvDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), 1, mCbv_srv_uavDescriptorSize);
+	cmdList->SetGraphicsRootDescriptorTable(4, texDescriptor);
+	auto passCB = mCurrFrameResource->PassCB->Resource();
+	cmdList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
+
 	cmdList->SetPipelineState(mPSOs["debug"].Get());
 	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::Debug]);
+
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmdList);
+
+	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+}
+
+void MyRasterizerApp::DrawWithoutBloom(ID3D12GraphicsCommandList* cmdList)
+{
+	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
+		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+	cmdList->RSSetViewports(1, &viewPort);
+	cmdList->RSSetScissorRects(1, &scissorRect);
+
+	cmdList->ClearRenderTargetView(CurrentBackBufferView(), Colors::LightSteelBlue, 0, nullptr);
+	cmdList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
+
+	cmdList->OMSetRenderTargets(1, &CurrentBackBufferView(), true, &DepthStencilView());
+
+	auto passCB = mCurrFrameResource->PassCB->Resource();
+	cmdList->SetGraphicsRootConstantBufferView(1, passCB->GetGPUVirtualAddress());
+
+	switch (mPBRShadingMode)
+	{
+	case PBRShadingMode::PBR:
+		cmdList->SetPipelineState(mPSOs["pbr"].Get());
+		break;
+	case PBRShadingMode::KullaContyPBR:
+		cmdList->SetPipelineState(mPSOs["KullaContyPBR"].Get());
+		break;
+	case PBRShadingMode::CookTorrancePBR:
+		cmdList->SetPipelineState(mPSOs["CookTorrancePBR"].Get());
+		break;
+	}
+
+	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::Opaque]);
+
+	cmdList->SetPipelineState(mPSOs["gun"].Get());
+	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::GUN]);
+
+	cmdList->SetPipelineState(mPSOs["bloomLight"].Get());
+	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::Bloom]);
+
+	cmdList->SetPipelineState(mPSOs["sky"].Get());
+	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::Sky]);
+
+	// Debug quad
+	cmdList->SetPipelineState(mPSOs["debug"].Get());
+	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::Debug]);
+
 	// 渲染 ImGui
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), cmdList);
 
@@ -1806,12 +1893,16 @@ void MyRasterizerApp::Draw()
 
 	DrawBasePass(mCommandList.Get());
 
-	DrawBrightPass(mCommandList.Get());
+	if (mEnableBloom)
+	{
+		// Bloom开启：执行亮度提取和模糊
+		DrawBrightPass(mCommandList.Get());
+		mBlurFilter->Execute(mCommandList.Get(), mBlurRootSignature.Get(),
+			mPSOs["hBlur"].Get(), mPSOs["vBlur"].Get(), mOffScreenRT->BrightPassResource(), 5);
+	}
 
-	mBlurFilter->Execute(mCommandList.Get(), mBlurRootSignature.Get(), 
-		mPSOs["hBlur"].Get(), mPSOs["vBlur"].Get(), mOffScreenRT->BrightPassResource(), 5);
-
-	DrawCompositePass(mCommandList.Get());
+	// Composite Pass 始终执行（色调映射+伽马矫正，可选混合Bloom）
+	DrawCompositePass(mCommandList.Get(), mEnableBloom);
 
 	// Done recording commands.
 	ThrowIfFailed(mCommandList->Close());
@@ -1973,6 +2064,11 @@ void MyRasterizerApp::Update(GameTime& gt)
 	// 示例 ImGui 窗口
 	ImGui::Begin("Debug Window");
 
+	if (ImGui::CollapsingHeader("Post Processing"))
+	{
+		ImGui::Checkbox("Enable Bloom", &mEnableBloom);
+	}
+
 	// --- PBR 模式 ---
 	if (ImGui::CollapsingHeader("Spheres' Shading Mode"))
 	{
@@ -1980,6 +2076,8 @@ void MyRasterizerApp::Update(GameTime& gt)
 			mPBRShadingMode = PBRShadingMode::PBR;
 		if (ImGui::RadioButton("KullaContyPBR", mPBRShadingMode == PBRShadingMode::KullaContyPBR))
 			mPBRShadingMode = PBRShadingMode::KullaContyPBR;
+		if (ImGui::RadioButton("CookTorancePBR", mPBRShadingMode == PBRShadingMode::CookTorrancePBR))
+			mPBRShadingMode = PBRShadingMode::CookTorrancePBR;
 	}
 
 	// --- AO 模式 ---
@@ -2327,6 +2425,8 @@ void MyRasterizerApp::LoadTextures()
 		"weaponRoughnessMap",
 		"weaponMetallicMap",
 		"weaponAOMap",
+		"caveDiffuseMap",
+		"caveNormalMap",
 	};
 
 	std::vector<std::wstring> texFilenames =
@@ -2345,6 +2445,8 @@ void MyRasterizerApp::LoadTextures()
 		L"D:\\DX12\\d3d12book\\Textures\\weapon_roughness.dds",
 		L"D:\\DX12\\d3d12book\\Textures\\weapon_metallic.dds",
 		L"D:\\DX12\\d3d12book\\Textures\\weapon_occlusion.dds",
+		L"D:\\DX12\\MyDX12Renderer\\MySoftRasterizer\\Models\\cave\\cave_albedo.dds",
+		L"D:\\DX12\\MyDX12Renderer\\MySoftRasterizer\\Models\\cave\\cave_normal.dds",
 	};
 
 	for (int i = 0; i < (int)texNames.size(); ++i)

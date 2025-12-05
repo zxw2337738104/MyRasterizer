@@ -9,6 +9,11 @@ SamplerState gsamAnisotropicWrap : register(s4);
 SamplerState gsamAnisotropicClamp : register(s5);
 SamplerComparisonState gsamShadow : register(s6);
 
+cbuffer cbSettings : register(b0)
+{
+    int gEnableBloom;
+};
+
 static const float2 gTexCoords[6] =
 {
     float2(0.0f, 1.0f),
@@ -43,22 +48,33 @@ VertexOut VS(uint vid : SV_VertexID)
     return vout;
 }
 
+float3 ToneMapping(float3 color)
+{
+    float exposure = 0.5f;
+    return 1.0f - exp(-color * exposure);
+}
+
+float3 GammaCorrection(float3 color)
+{
+    return pow(color, 1.0f / 2.2f);
+}
+
 float4 PS(VertexOut pin) : SV_Target
 {
     float3 BaseColor = gBasePassMap.Sample(gsamPointClamp, pin.TexC).rgb;
     
-    float3 BrightColor = gBrightPassMap.Sample(gsamPointClamp, pin.TexC).rgb;
     
-    if(pin.Index == 1)
+    float3 BrightColor = gBrightPassMap.Sample(gsamPointClamp, pin.TexC).rgb;
+    if (pin.Index == 1)
         return float4(BrightColor, 1.0f);
     
-    BaseColor += BrightColor;
+    if (gEnableBloom == 1)
+    {
+        BaseColor += BrightColor;
+    }
     
-    float exposure = 0.8f;
-    float3 result = 1.0f - exp(-BaseColor * exposure);
-    //float3 result = BaseColor / (BaseColor + float3(1.0f, 1.0f, 1.0f));
-    
-    result = pow(result, 1.0f / 2.2f);
+    float3 result = ToneMapping(BaseColor);
+    result = GammaCorrection(result);
     
     return float4(result, 1.0f);
 }

@@ -19,6 +19,7 @@ struct VertexOut
     float2 TexC : TEXCOORD;
     
     nointerpolation uint MatIndex : MATINDEX;
+    int LightIndex : LIGHTINDEX;
 };
 
 VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
@@ -49,6 +50,8 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     vout.TexC = mul(texC, matData.MatTransform).xy;
     
     vout.ShadowPosH = mul(posW, gShadowTransform);
+    
+    vout.LightIndex = instanceID;
     
     return vout;
 }
@@ -106,5 +109,9 @@ float4 PS(VertexOut pin) : SV_Target
     litColor.a = diffuseAlbedo.a * 0.4f;
 	
     //return litColor;
+    if(pin.LightIndex == 0)
+        return float4(1.0f, 0.0f, 0.0f, 1.0f);
+    else if (pin.LightIndex == 1)
+        return float4(0.0f, 1.0f, 0.0f, 1.0f);
     return float4(0.0f, 0.0f, 1.0f, 1.0f);
 }
