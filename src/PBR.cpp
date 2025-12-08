@@ -10,6 +10,7 @@
 #include "Ssao.h"
 #include "OffScreenRenderTarget.h"
 #include "BlurFilter.h"
+#include "TAA.h"
 #include "../utils/DDSTextureLoader.h"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -175,6 +176,7 @@ private:
 	void BuildSsaoRootSignature();
 	void BuildBloomRootSignature();
 	void BuildBlurRootSignature();
+	void BuildTAAResolveRootSignature();
 	void BuildShadersAndInputLayout();
 	void BuildPSOs();
 	void BuildFrameResources();
@@ -186,7 +188,7 @@ private:
 	void DrawFullScreenQuad(ID3D12GraphicsCommandList* cmdList);
 	void DrawBasePass(ID3D12GraphicsCommandList* cmdList);
 	void DrawBrightPass(ID3D12GraphicsCommandList* cmdList);
-	void DrawCompositePass(ID3D12GraphicsCommandList* cmdList, bool mEnableBloom);
+	void DrawCompositePass(ID3D12GraphicsCommandList* cmdList, bool mEnableBloom, bool mEnableTAA);
 	void DrawWithoutBloom(ID3D12GraphicsCommandList* cmdList);
 
 	std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> GetStaticSamplers();
@@ -208,6 +210,8 @@ private:
 	void UpdateShadowTransform();
 	void UpdateShadowPassCBs();
 	void UpdateSsaoCBs();
+	void UpdateTAACBs();
+	void UpdateTAAResolveCBs();
 
 	virtual void CreateDescriptorHeap() override;
 
@@ -219,11 +223,14 @@ private:
 	void DrawSceneToBRDFLUT_Eu();
 	void DrawSceneToLUT_Eavg();
 	void DrawNormalsAndDepth();
+	void DrawMotionVectors(ID3D12GraphicsCommandList* cmdList);
+	void DrawTAAResolve(ID3D12GraphicsCommandList* cmdList);
 
 	ComPtr<ID3D12RootSignature> mRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mSsaoRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mBloomRootSignature = nullptr;
 	ComPtr<ID3D12RootSignature> mBlurRootSignature = nullptr;
+	ComPtr<ID3D12RootSignature> mTAAResolveRootSignature = nullptr;
 	ComPtr<ID3D12DescriptorHeap> mSrvDescriptorHeap = nullptr;
 	ComPtr<ID3D12Resource> mCubeDepthStencilBuffer = nullptr;
 
@@ -268,6 +275,7 @@ private:
 	UINT mSsaoSrvIndex = 0;
 	UINT mBasePassSrvIndex = 0;
 	UINT mBlurSrvIndex = 0;
+	UINT mTAASrvIndex = 0;
 
 	std::unique_ptr<CubeRenderTarget> mDynamicCubeMap = nullptr;
 	CD3DX12_CPU_DESCRIPTOR_HANDLE mCubeDSV;
@@ -301,9 +309,17 @@ private:
 	UINT mAOType = 0;
 	bool mEnableBloom = true;
 
+	UINT mFrameCount = 0;
+	XMFLOAT4X4 mPrevViewProj = MathHelper::Identity4x4();
+	XMFLOAT2 mPrevJitterOffset = { 0.0f, 0.0f };
+	bool mEnableTAA = true;
+	float mTAABlendFactor = 0.1f;
+	float mTAAVarianceClipGamma = 1.0f;
+
 	std::unique_ptr<Ssao> mSsao = nullptr;
 	std::unique_ptr<OffScreenRenderTarget> mOffScreenRT = nullptr;
 	std::unique_ptr<BlurFilter> mBlurFilter = nullptr;
+	std::unique_ptr<TAA> mTAA = nullptr;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nShowCmd)
@@ -364,6 +380,9 @@ bool MyRasterizerApp::Init()
 		mClientWidth, mClientHeight,
 		mBackBufferFormat);
 
+	mTAA = std::make_unique<TAA>(md3dDevice.Get(),
+		mClientWidth, mClientHeight);
+
 	LoadModels("Models/Cyborg_Weapon.fbx");
 
 	LoadTextures();
@@ -371,6 +390,7 @@ bool MyRasterizerApp::Init()
 	BuildSsaoRootSignature();
 	BuildBloomRootSignature();
 	BuildBlurRootSignature();
+	BuildTAAResolveRootSignature();
 	BuildDescriptorHeaps();
 	BuildShadersAndInputLayout();
 	BuildGeometry();
@@ -400,7 +420,7 @@ bool MyRasterizerApp::Init()
 void MyRasterizerApp::CreateDescriptorHeap()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + 6 + 1 + 2 + 3 + 2; // 6 for the cube map faces
+	rtvHeapDesc.NumDescriptors = SwapChainBufferCount + 6 + 1 + 2 + 3 + 2 + 2; // 6 for the cube map faces
 	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&mRtvHeap)));
@@ -422,7 +442,7 @@ void MyRasterizerApp::CreateDescriptorHeap()
 void MyRasterizerApp::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 33; // Adjust as needed
+	srvHeapDesc.NumDescriptors = 36; // Adjust as needed
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -554,6 +574,14 @@ void MyRasterizerApp::BuildDescriptorHeaps()
 		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mBlurSrvIndex, mCbv_srv_uavDescriptorSize),
 		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mBlurSrvIndex, mCbv_srv_uavDescriptorSize),
 		mCbv_srv_uavDescriptorSize);
+
+	mTAASrvIndex = mBlurSrvIndex + 4;
+	mTAA->BuildDescriptors(
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(srvCpuStart, mTAASrvIndex, mCbv_srv_uavDescriptorSize),
+		CD3DX12_GPU_DESCRIPTOR_HANDLE(srvGpuStart, mTAASrvIndex, mCbv_srv_uavDescriptorSize),
+		CD3DX12_CPU_DESCRIPTOR_HANDLE(mRtvHeap->GetCPUDescriptorHandleForHeapStart(), 16, mRtvDescriptorSize),
+		mCbv_srv_uavDescriptorSize,
+		mRtvDescriptorSize);
 }
 
 void MyRasterizerApp::BuildCubeDepthStencil()
@@ -626,7 +654,7 @@ void MyRasterizerApp::BuildCubeMapCamera(float x, float y, float z)
 
 void MyRasterizerApp::BuildRootSignature()
 {
-	CD3DX12_ROOT_PARAMETER rootParameters[5];
+	CD3DX12_ROOT_PARAMETER rootParameters[6];
 
 	//SRV for IMGUI
 	rootParameters[0].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0));
@@ -640,9 +668,11 @@ void MyRasterizerApp::BuildRootSignature()
 	rootParameters[3].InitAsShaderResourceView(0, 1);
 	//SRV for Textures
 	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 22, 1));
+	//TAACB
+	rootParameters[5].InitAsConstantBufferView(2);
 	auto staticSamplers = GetStaticSamplers();
 
-	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(5, rootParameters, 
+	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(6, rootParameters, 
 		(UINT)staticSamplers.size(), staticSamplers.data(),
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 	ComPtr<ID3DBlob> serializedRootSig = nullptr;
@@ -798,6 +828,53 @@ void MyRasterizerApp::BuildBlurRootSignature()
 		IID_PPV_ARGS(mBlurRootSignature.GetAddressOf())
 	));
 }
+
+void MyRasterizerApp::BuildTAAResolveRootSignature()
+{
+    // TAA Resolve Pass需要：
+    // - cbTAAResolve (b0): TexelSize, BlendFactor, VarianceClipGamma
+    // - t0: Current frame color
+    // - t1: History buffer
+    // - t2: Motion vectors
+    // - t3: Depth buffer
+
+	CD3DX12_ROOT_PARAMETER rootParameters[4];
+
+	// 常量缓冲区
+	rootParameters[0].InitAsConstantBufferView(0); // b0
+
+	// 4个SRV，每个单独一个descriptor table，方便灵活绑定
+	CD3DX12_DESCRIPTOR_RANGE srvRange0, srvRange1, srvRange2, srvRange3;
+	srvRange0.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 - current color
+	srvRange1.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1); // t1 - history
+	srvRange2.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2); // t2 - motion vectors
+
+	rootParameters[1].InitAsDescriptorTable(1, &srvRange0, D3D12_SHADER_VISIBILITY_PIXEL);
+	rootParameters[2].InitAsDescriptorTable(1, &srvRange1, D3D12_SHADER_VISIBILITY_PIXEL);
+	rootParameters[3].InitAsDescriptorTable(1, &srvRange2, D3D12_SHADER_VISIBILITY_PIXEL);
+
+	auto staticSamplers = GetStaticSamplers();
+
+	CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(4, rootParameters,
+		(UINT)staticSamplers.size(), staticSamplers.data(),
+		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+	ComPtr<ID3DBlob> serializedRootSig = nullptr;
+	ComPtr<ID3DBlob> errorBlob = nullptr;
+	HRESULT hr = D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+		serializedRootSig.GetAddressOf(), errorBlob.GetAddressOf());
+
+	if (errorBlob != nullptr)
+		OutputDebugStringA((char*)errorBlob->GetBufferPointer());
+	ThrowIfFailed(hr);
+
+	ThrowIfFailed(md3dDevice->CreateRootSignature(
+		0,
+		serializedRootSig->GetBufferPointer(),
+		serializedRootSig->GetBufferSize(),
+		IID_PPV_ARGS(mTAAResolveRootSignature.GetAddressOf())));
+}
+
 void MyRasterizerApp::BuildShadersAndInputLayout()
 {
 	const D3D_SHADER_MACRO alphaTestedDefines[] =
@@ -861,6 +938,12 @@ void MyRasterizerApp::BuildShadersAndInputLayout()
 
 	mShaders["compositeVS"] = CompileShader(L"shaders\\Composite.hlsl", nullptr, "VS", "vs_5_1");
 	mShaders["compositePS"] = CompileShader(L"shaders\\Composite.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["motionVectorVS"] = CompileShader(L"shaders\\MotionVector.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["motionVectorPS"] = CompileShader(L"shaders\\MotionVector.hlsl", nullptr, "PS", "ps_5_1");
+
+	mShaders["taaResolveVS"] = CompileShader(L"shaders\\TAA.hlsl", nullptr, "VS", "vs_5_1");
+	mShaders["taaResolvePS"] = CompileShader(L"shaders\\TAA.hlsl", nullptr, "PS", "ps_5_1");
 
 	mInputLayout = {
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -1045,6 +1128,25 @@ void MyRasterizerApp::BuildPSOs()
 	compositePsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["compositeVS"]->GetBufferPointer()), mShaders["compositeVS"]->GetBufferSize() };
 	compositePsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["compositePS"]->GetBufferPointer()), mShaders["compositePS"]->GetBufferSize() };
 	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&compositePsoDesc, IID_PPV_ARGS(&mPSOs["composite"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC motionVectorPsoDesc = opaquePsoDesc;
+	motionVectorPsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["motionVectorVS"]->GetBufferPointer()), mShaders["motionVectorVS"]->GetBufferSize() };
+	motionVectorPsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["motionVectorPS"]->GetBufferPointer()), mShaders["motionVectorPS"]->GetBufferSize() };
+	motionVectorPsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+	motionVectorPsoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16_FLOAT;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&motionVectorPsoDesc, IID_PPV_ARGS(&mPSOs["motionVector"])));
+
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC taaResolvePsoDesc = opaquePsoDesc;
+	taaResolvePsoDesc.InputLayout = { nullptr, 0 }; // TAA Resolve does not use input layout
+	taaResolvePsoDesc.pRootSignature = mTAAResolveRootSignature.Get();
+	taaResolvePsoDesc.VS = { reinterpret_cast<BYTE*>(mShaders["taaResolveVS"]->GetBufferPointer()), mShaders["taaResolveVS"]->GetBufferSize() };
+	taaResolvePsoDesc.PS = { reinterpret_cast<BYTE*>(mShaders["taaResolvePS"]->GetBufferPointer()), mShaders["taaResolvePS"]->GetBufferSize() };
+	taaResolvePsoDesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	taaResolvePsoDesc.DepthStencilState.DepthEnable = false;
+	taaResolvePsoDesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+	taaResolvePsoDesc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	taaResolvePsoDesc.DSVFormat = DXGI_FORMAT_UNKNOWN;
+	ThrowIfFailed(md3dDevice->CreateGraphicsPipelineState(&taaResolvePsoDesc, IID_PPV_ARGS(&mPSOs["taaResolve"])));
 }
 
 void MyRasterizerApp::BuildFrameResources()
@@ -1674,6 +1776,63 @@ void MyRasterizerApp::DrawNormalsAndDepth()
 		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
 }
 
+void MyRasterizerApp::DrawMotionVectors(ID3D12GraphicsCommandList* cmdList)
+{
+	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mTAA->MotionVectorBuffer(),
+		D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET
+	));
+
+	float clearColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	cmdList->ClearRenderTargetView(mTAA->MotionVectorRtv(), clearColor, 0, nullptr);
+	cmdList->OMSetRenderTargets(1, &mTAA->MotionVectorRtv(), true, &DepthStencilView());
+
+	auto taaCBAddress = mCurrFrameResource->TaaCB->Resource()->GetGPUVirtualAddress();
+	cmdList->SetGraphicsRootConstantBufferView(5, taaCBAddress);
+	cmdList->SetPipelineState(mPSOs["motionVector"].Get());
+
+	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::Opaque]);
+	DrawRenderItems(cmdList, mRitemLayer[(int)RenderLayer::GUN]);
+
+	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mTAA->MotionVectorBuffer(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ
+	));
+}
+
+void MyRasterizerApp::DrawTAAResolve(ID3D12GraphicsCommandList* cmdList)
+{
+	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mTAA->OutputBuffer(),
+		D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET));
+
+	cmdList->OMSetRenderTargets(1, &mTAA->OutputRtv(), true, nullptr);
+
+	cmdList->SetGraphicsRootSignature(mTAAResolveRootSignature.Get());
+	cmdList->SetPipelineState(mPSOs["taaResolve"].Get());
+
+	auto taaResolveCBAddress = mCurrFrameResource->TaaResolveCB->Resource()->GetGPUVirtualAddress();
+	mCommandList->SetGraphicsRootConstantBufferView(0, taaResolveCBAddress);
+
+	// [1] Current frame color (BasePass输出)
+	mCommandList->SetGraphicsRootDescriptorTable(1, mOffScreenRT->BasePassSrv());
+
+	// [2] History buffer
+	mCommandList->SetGraphicsRootDescriptorTable(2, mTAA->HistorySrv());
+
+	// [3] Motion vectors
+	mCommandList->SetGraphicsRootDescriptorTable(3, mTAA->MotionVectorSrv());
+
+	DrawFullScreenQuad(cmdList);
+
+	// 恢复主根签名（供后续Pass使用）
+	mCommandList->SetGraphicsRootSignature(mRootSignature.Get());
+
+	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+		mTAA->OutputBuffer(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_GENERIC_READ));
+}
+
 void MyRasterizerApp::DrawFullScreenQuad(ID3D12GraphicsCommandList* cmdList)
 {
 	cmdList->IASetVertexBuffers(0, 1, nullptr);
@@ -1740,12 +1899,21 @@ void MyRasterizerApp::DrawBrightPass(ID3D12GraphicsCommandList* cmdList)
 
 	cmdList->SetGraphicsRootSignature(mBloomRootSignature.Get());
 	cmdList->SetPipelineState(mPSOs["brightPass"].Get());
-	cmdList->SetGraphicsRootDescriptorTable(0, mOffScreenRT->BasePassSrv());
+	//cmdList->SetGraphicsRootDescriptorTable(0, mOffScreenRT->BasePassSrv());
+
+	if (mEnableTAA)
+	{
+		cmdList->SetGraphicsRootDescriptorTable(0, mTAA->OutputSrv());
+	}
+	else
+	{
+		cmdList->SetGraphicsRootDescriptorTable(0, mOffScreenRT->BasePassSrv());
+	}
 
 	DrawFullScreenQuad(cmdList);
 }
 
-void MyRasterizerApp::DrawCompositePass(ID3D12GraphicsCommandList* cmdList, bool enableBloom)
+void MyRasterizerApp::DrawCompositePass(ID3D12GraphicsCommandList* cmdList, bool enableBloom, bool enableTAA)
 {
 	cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
@@ -1758,7 +1926,20 @@ void MyRasterizerApp::DrawCompositePass(ID3D12GraphicsCommandList* cmdList, bool
 
 	cmdList->SetGraphicsRootSignature(mBloomRootSignature.Get());
 	cmdList->SetPipelineState(mPSOs["composite"].Get());
-	cmdList->SetGraphicsRootDescriptorTable(0, mOffScreenRT->BasePassSrv());
+	//cmdList->SetGraphicsRootDescriptorTable(0, mOffScreenRT->BasePassSrv());
+	//cmdList->SetGraphicsRootDescriptorTable(1, mBlurFilter->Srv());
+
+	if (enableTAA)
+	{
+		// 使用TAA输出作为主场景颜色输入
+		cmdList->SetGraphicsRootDescriptorTable(0, mTAA->OutputSrv());
+	}
+	else
+	{
+		// 使用BasePass输出作为主场景颜色输入
+		cmdList->SetGraphicsRootDescriptorTable(0, mOffScreenRT->BasePassSrv());
+	}
+
 	cmdList->SetGraphicsRootDescriptorTable(1, mBlurFilter->Srv());
 
 	// 传递Bloom开关参数
@@ -1893,6 +2074,12 @@ void MyRasterizerApp::Draw()
 
 	DrawBasePass(mCommandList.Get());
 
+	if (mEnableTAA)
+	{
+		DrawMotionVectors(mCommandList.Get());
+		DrawTAAResolve(mCommandList.Get());
+	}
+
 	if (mEnableBloom)
 	{
 		// Bloom开启：执行亮度提取和模糊
@@ -1901,8 +2088,18 @@ void MyRasterizerApp::Draw()
 			mPSOs["hBlur"].Get(), mPSOs["vBlur"].Get(), mOffScreenRT->BrightPassResource(), 5);
 	}
 
+	ID3D12Resource* finalColor = mEnableTAA ? mTAA->OutputBuffer() : mOffScreenRT->BasePassResource();
 	// Composite Pass 始终执行（色调映射+伽马矫正，可选混合Bloom）
-	DrawCompositePass(mCommandList.Get(), mEnableBloom);
+	DrawCompositePass(mCommandList.Get(), mEnableBloom, mEnableTAA);
+
+	if (mEnableTAA)
+	{
+		mTAA->SwapHistoryBuffer(mCommandList.Get());
+	}
+
+	mPrevViewProj = mMainPassCB.ViewProj;
+	mPrevJitterOffset = mTAA->GetJitterOffset(mFrameCount);
+	mFrameCount++;
 
 	// Done recording commands.
 	ThrowIfFailed(mCommandList->Close());
@@ -2067,6 +2264,14 @@ void MyRasterizerApp::Update(GameTime& gt)
 	if (ImGui::CollapsingHeader("Post Processing"))
 	{
 		ImGui::Checkbox("Enable Bloom", &mEnableBloom);
+		ImGui::Checkbox("Enable TAA", &mEnableTAA);
+		if (mEnableTAA)
+		{
+			ImGui::Indent();
+			ImGui::SliderFloat("TAA Blend Factor", &mTAABlendFactor, 0.05f, 0.1f);
+			ImGui::SliderFloat("TAA VarianceClipGamma", &mTAAVarianceClipGamma, 1.0f, 1.5f);
+			ImGui::Unindent();
+		}
 	}
 
 	// --- PBR 模式 ---
@@ -2122,6 +2327,11 @@ void MyRasterizerApp::Update(GameTime& gt)
 	UpdateMaterialCBs(gt);
 	UpdateShadowTransform();
 	UpdateMainPassCBs();
+	if (mEnableTAA)
+	{
+		UpdateTAACBs();
+		UpdateTAAResolveCBs();
+	}
 	UpdateShadowPassCBs();
 	UpdateSsaoCBs();
 	// 渲染 ImGui
@@ -2148,6 +2358,14 @@ void MyRasterizerApp::UpdateMainPassCBs()
 {
 	XMMATRIX view = mCamera.GetView();
 	XMMATRIX proj = mCamera.GetProj();
+
+	if (mEnableTAA)
+	{
+		XMFLOAT2 jitter = mTAA->GetJitterOffset(mFrameCount);
+		XMMATRIX jitterMatrix = XMMatrixTranslation(jitter.x, jitter.y, 0.0f);
+		proj = proj * jitterMatrix;
+	}
+
 	XMMATRIX viewProj = XMMatrixMultiply(view, proj);
 	XMMATRIX invView = XMMatrixInverse(&XMMatrixDeterminant(view), view);
 	XMMATRIX invProj = XMMatrixInverse(&XMMatrixDeterminant(proj), proj);
@@ -2383,6 +2601,49 @@ void MyRasterizerApp::UpdateSsaoCBs()
 
 	auto currSsaoCB = mCurrFrameResource->SsaoCB.get();
 	currSsaoCB->CopyData(0, ssaoCB);
+}
+
+void MyRasterizerApp::UpdateTAACBs()
+{
+	XMFLOAT2 jitter = mTAA->GetJitterOffset(mFrameCount);
+
+	XMMATRIX view = mCamera.GetView();
+	XMMATRIX proj = mCamera.GetProj();
+	XMMATRIX viewProj = view * proj;
+
+	TAAConstants taaCB;
+
+	if (mFrameCount == 0)
+	{
+		XMStoreFloat4x4(&taaCB.PrevViewProj, XMMatrixTranspose(viewProj));
+	}
+	else
+	{
+		taaCB.PrevViewProj = mPrevViewProj;
+	}
+
+	XMStoreFloat4x4(&taaCB.CurrViewProj, XMMatrixTranspose(viewProj));
+
+	taaCB.JitterOffset = jitter;
+	taaCB.PrevJitterOffset = mPrevJitterOffset;
+
+	auto currFrameResource = mCurrFrameResource;
+	currFrameResource->TaaCB->CopyData(0, taaCB);
+
+	XMStoreFloat4x4(&mPrevViewProj, XMMatrixTranspose(viewProj));
+	mPrevJitterOffset = jitter;
+}
+
+void MyRasterizerApp::UpdateTAAResolveCBs()
+{
+	TAAResovlveConstants taaResolveCB;
+
+	taaResolveCB.TexelSize = XMFLOAT2(1.0f / mClientWidth, 1.0f / mClientHeight);
+	taaResolveCB.BlendFactor = mTAABlendFactor;
+	taaResolveCB.VarianceClipGamma = mTAAVarianceClipGamma;
+
+	auto currFrameResource = mCurrFrameResource;
+	currFrameResource->TaaResolveCB->CopyData(0, taaResolveCB);
 }
 
 void MyRasterizerApp::OnKeyboardInput(GameTime& gt)

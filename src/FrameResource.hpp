@@ -97,6 +97,21 @@ struct SSRConstants
 	UINT SSRPad1;
 };
 
+struct TAAConstants
+{
+	XMFLOAT4X4 PrevViewProj = MathHelper::Identity4x4();
+	XMFLOAT4X4 CurrViewProj = MathHelper::Identity4x4();
+	XMFLOAT2 JitterOffset = { 0.0f, 0.0f };
+	XMFLOAT2 PrevJitterOffset = { 0.0f, 0.0f };
+};
+
+struct TAAResovlveConstants
+{
+	XMFLOAT2 TexelSize = { 0.0f, 0.0f };
+	float BlendFactor = 0.1f;
+	float VarianceClipGamma = 1.0f;
+};
+
 struct MaterialData
 {
 	XMFLOAT4 DiffuseAlbedo = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -125,6 +140,8 @@ public:
 	std::unique_ptr<UploadBufferResource<SsaoConstants>> SsaoCB = nullptr;
 	std::unique_ptr<UploadBufferResource<MaterialData>> MatSB = nullptr;
 	std::unique_ptr<UploadBufferResource<SSRConstants>> SsrCB = nullptr;
+	std::unique_ptr<UploadBufferResource<TAAConstants>> TaaCB = nullptr;
+	std::unique_ptr<UploadBufferResource<TAAResovlveConstants>> TaaResolveCB = nullptr;
 	//std::unique_ptr<UploadBufferResource<SkinnedConstants>> SkinnedCB = nullptr;
 
 	UINT64 FenceCPU = 0;

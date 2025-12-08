@@ -10,6 +10,8 @@ FrameResource::FrameResource(ID3D12Device* device, UINT passCount, UINT objCount
 	SsrCB = std::make_unique<UploadBufferResource<SSRConstants>>(device, 1, true);
 	//ObjectCB = std::make_unique<UploadBufferResource<ObjectConstants>>(device, objCount, true);
 	InstanceBuffer = std::make_unique<UploadBufferResource<InstanceData>>(device, objCount, false);
+	TaaCB = std::make_unique<UploadBufferResource<TAAConstants>>(device, 1, true);
+	TaaResolveCB = std::make_unique<UploadBufferResource<TAAResovlveConstants>>(device, 1, true);
 	MatSB = std::make_unique<UploadBufferResource<MaterialData>>(device, matCount, false);
 	//SkinnedCB = std::make_unique<UploadBufferResource<SkinnedConstants>>(device, skinnedObjectCount, true);
 }
