@@ -2247,6 +2247,17 @@ void MyRasterizerApp::OnResize()
 		mBlurFilter->OnResize(mClientWidth, mClientHeight);
 	}
 
+	if (mOffScreenRT != nullptr)
+	{
+		mOffScreenRT->OnResize(mClientWidth, mClientHeight);
+	}
+
+	if (mTAA != nullptr)
+	{
+		mTAA->OnResize(mClientWidth, mClientHeight);
+		mFrameCount = 0;
+	}
+
 	mCamera.SetLens(0.25 * MathHelper::Pi, AspectRatio(), 0.1f, 1000.0f);
 }
 

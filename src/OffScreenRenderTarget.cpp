@@ -128,5 +128,6 @@ void OffScreenRenderTarget::OnResize(UINT newWidth, UINT newHeight)
 		mWidth = newWidth;
 		mHeight = newHeight;
 		BuildResource();
+		BuildDescriptors();
 	}
 }
