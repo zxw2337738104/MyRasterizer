@@ -70,6 +70,17 @@ float3 ClipAABB(float3 aabbMin, float3 aabbMax, float3 prevSample)
     return center + offset * t;
 }
 
+float Luminance(float3 color)
+{
+    return dot(color, float3(0.299, 0.587, 0.114));
+}
+
+// Tonemap权重：高亮度 → 低权重
+float HDRWeight(float3 color)
+{
+    return rcp(1.0f + Luminance(color) * 12.0f);
+}
+
 float4 PS(VertexOut pin) : SV_Target
 {
     float2 uv = pin.TexC;
@@ -124,10 +135,17 @@ float4 PS(VertexOut pin) : SV_Target
     // 将历史颜色裁剪到AABB内
     float3 historyYCoCg = RGBToYCoCg(historyColor);
     float3 clippedHistory = ClipAABB(aabbMin, aabbMax, historyYCoCg);
-    historyColor = YCoCgToRGB(clippedHistory);
+    float3 clippedHistoryRGB = YCoCgToRGB(clippedHistory);
     
-    // 混合
-    float3 result = lerp(historyColor, currentColor, gBlendFactor);
+    // ===== Luminance Weighting =====
+    float weightCurrent = HDRWeight(currentColor);
+    float weightHistory = HDRWeight(clippedHistoryRGB);
+    
+    // 加权混合
+    float3 result = (currentColor * weightCurrent * gBlendFactor +
+                     clippedHistoryRGB * weightHistory * (1.0f - gBlendFactor)) /
+                    (weightCurrent * gBlendFactor +
+                     weightHistory * (1.0f - gBlendFactor) + 0.0001f);
     
     return float4(result, 1.0f);
 }
