@@ -2453,23 +2453,36 @@ void MyRasterizerApp::UpdateInstanceBuffers(GameTime& gt)
 	int instanceIndex = 0;
 	for (auto& e : mAllRitems)
 	{
-		const auto& instanceData = e->Instances;
+		auto& instanceData = e->Instances;
 		e->InstanceBufferIndex = instanceIndex;
 		for (UINT i = 0; i < (UINT)instanceData.size(); ++i)
 		{
+			InstanceData data;
+
 			XMMATRIX world = XMLoadFloat4x4(&instanceData[i].World);
+
+			if (mFrameCount == 0)
+			{
+				data.PrevWorld = data.World;
+			}
+			else
+			{
+				XMStoreFloat4x4(&data.PrevWorld, XMMatrixTranspose(XMLoadFloat4x4(&instanceData[i].PrevWorld)));
+			}
 
 			XMMATRIX invWorld = XMMatrixInverse(&XMMatrixDeterminant(world), world);
 			XMMATRIX invTpsWorld = XMMatrixTranspose(invWorld);
 
-			InstanceData data;
-			XMStoreFloat4x4(&data.World, XMMatrixTranspose(XMLoadFloat4x4(&instanceData[i].World)));
+			XMStoreFloat4x4(&data.World, XMMatrixTranspose(world));
 			XMStoreFloat4x4(&data.InvTpsWorld, invTpsWorld);
 			XMStoreFloat4x4(&data.TexTransform, XMMatrixTranspose(XMLoadFloat4x4(&instanceData[i].TexTransform)));
 			data.MaterialIndex = instanceData[i].MaterialIndex;
 			data.AOType = mAOType;
 
 			currInstanceBuffer->CopyData(instanceIndex++, data);
+
+			// 更新上一帧的World矩阵，用于TAA和运动模糊
+			instanceData[i].PrevWorld = instanceData[i].World;
 		}
 		e->InstanceCount = (UINT)instanceData.size();
 	}

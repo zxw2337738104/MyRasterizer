@@ -27,6 +27,7 @@ struct MaterialData
 struct InstanceData
 {
     float4x4 World;
+    float4x4 PrevWorld;
     float4x4 InvTpsWorld;
     float4x4 TexTransform;
     uint MaterialIndex;

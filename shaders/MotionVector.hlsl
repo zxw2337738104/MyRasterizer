@@ -29,16 +29,26 @@ VertexOut VS(VertexIn vin, uint instanceID : SV_InstanceID)
     VertexOut vout = (VertexOut) 0.0f;
     
     InstanceData instData = gInstanceData[instanceID];
-    float4x4 gWorld = instData.World;
+    //float4x4 gWorld = instData.World;
     
-    float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
+    //float4 posW = mul(float4(vin.PosL, 1.0f), gWorld);
+    
+    //// 当前帧位置（带抖动）
+    //vout.CurrPosH = mul(posW, gCurrViewProj);
+    
+    //// 上一帧位置（静态物体使用相同世界坐标，动态物体需要上一帧的世界矩阵）
+    //// 这里假设是静态物体
+    //vout.PrevPosH = mul(posW, gPrevViewProj);
+    
+    // 如果有动态物体，使用下面的代码
+    float4 currPosW = mul(float4(vin.PosL, 1.0f), instData.World);
+    float4 prevPosW = mul(float4(vin.PosL, 1.0f), instData.PrevWorld);
     
     // 当前帧位置（带抖动）
-    vout.CurrPosH = mul(posW, gCurrViewProj);
+    vout.CurrPosH = mul(currPosW, gCurrViewProj);
     
     // 上一帧位置（静态物体使用相同世界坐标，动态物体需要上一帧的世界矩阵）
-    // 这里假设是静态物体
-    vout.PrevPosH = mul(posW, gPrevViewProj);
+    vout.PrevPosH = mul(prevPosW, gPrevViewProj);
     
     vout.PosH = vout.CurrPosH;
     

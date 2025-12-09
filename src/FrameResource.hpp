@@ -27,6 +27,7 @@ struct ObjectConstants {
 struct InstanceData
 {
 	XMFLOAT4X4 World = MathHelper::Identity4x4();
+	XMFLOAT4X4 PrevWorld = MathHelper::Identity4x4();
 	XMFLOAT4X4 InvTpsWorld = MathHelper::Identity4x4();
 	XMFLOAT4X4 TexTransform = MathHelper::Identity4x4();
 
