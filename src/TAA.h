@@ -1,4 +1,3 @@
-// src/TAA.h
 #pragma once
 #include "DXHelper.h"
 

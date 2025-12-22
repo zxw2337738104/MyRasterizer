@@ -90,10 +90,13 @@
     <ClCompile Include="src\HiZBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\PBR.cpp">
+    <ClCompile Include="src\TAA.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\TAA.cpp">
+    <ClCompile Include="src\PCSS.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\PBR.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

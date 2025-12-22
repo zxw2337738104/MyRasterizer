@@ -1,4 +1,3 @@
-// shaders/MotionVector.hlsl
 #include "Common.hlsl"
 
 cbuffer cbTAA : register(b2)

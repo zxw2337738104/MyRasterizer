@@ -1,4 +1,3 @@
-// src/TAA.cpp
 #include "TAA.h"
 
 TAA::TAA(ID3D12Device* device, UINT width, UINT height)

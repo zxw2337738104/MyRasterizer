@@ -1,5 +1,3 @@
-// shaders/TAA.hlsl
-
 Texture2D gCurrentFrame : register(t0); // 当前帧颜色
 Texture2D gHistoryFrame : register(t1); // 历史帧颜色
 Texture2D gMotionVector : register(t2); // 运动向量

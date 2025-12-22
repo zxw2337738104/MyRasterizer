@@ -396,7 +396,7 @@ void MySoftRasterizationApp::CreateDescriptorHeap()
 void MySoftRasterizationApp::BuildDescriptorHeaps()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-	srvHeapDesc.NumDescriptors = 25; // Adjust as needed
+	srvHeapDesc.NumDescriptors = 27; // Adjust as needed
 	srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
 	srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	ThrowIfFailed(md3dDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&mSrvDescriptorHeap)));
@@ -428,7 +428,9 @@ void MySoftRasterizationApp::BuildDescriptorHeaps()
 		mTextures["weaponNormalMap"]->Resource,
 		mTextures["weaponRoughnessMap"]->Resource,
 		mTextures["weaponMetallicMap"]->Resource,
-		mTextures["weaponAOMap"]->Resource
+		mTextures["weaponAOMap"]->Resource,
+		mTextures["caveDiffuseMap"]->Resource,
+		mTextures["caveNormalMap"]->Resource
 	};//13
 
 	auto skyCubeMap = mTextures["skyCubeMap"]->Resource;
@@ -597,7 +599,7 @@ void MySoftRasterizationApp::BuildRootSignature()
 	//MaterialSB
 	rootParameters[3].InitAsShaderResourceView(0, 1);
 	//SRV for Textures
-	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 20, 1));
+	rootParameters[4].InitAsDescriptorTable(1, &CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 22, 1));
 	auto staticSamplers = GetStaticSamplers();
 
 	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(5, rootParameters,
@@ -2103,6 +2105,8 @@ void MySoftRasterizationApp::LoadTextures()
 		"weaponRoughnessMap",
 		"weaponMetallicMap",
 		"weaponAOMap",
+		"caveDiffuseMap",
+		"caveNormalMap",
 	};
 
 	std::vector<std::wstring> texFilenames =
@@ -2121,6 +2125,8 @@ void MySoftRasterizationApp::LoadTextures()
 		L"D:\\DX12\\d3d12book\\Textures\\weapon_roughness.dds",
 		L"D:\\DX12\\d3d12book\\Textures\\weapon_metallic.dds",
 		L"D:\\DX12\\d3d12book\\Textures\\weapon_occlusion.dds",
+		L"D:\\DX12\\MyDX12Renderer\\MySoftRasterizer\\Models\\cave\\cave_albedo.dds",
+		L"D:\\DX12\\MyDX12Renderer\\MySoftRasterizer\\Models\\cave\\cave_normal.dds",
 	};
 
 	for (int i = 0; i < (int)texNames.size(); ++i)

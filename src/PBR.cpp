@@ -2022,11 +2022,16 @@ void MyRasterizerApp::Draw()
 {
 	// Reuse the memory associated with command recording.
 	// We can only reset when the associated command lists have finished execution on the GPU.
-	ThrowIfFailed(mDirectCmdListAlloc->Reset());
+	auto cmdListAlloc = mCurrFrameResource->CmdListAlloc.Get();
+
+	ThrowIfFailed(cmdListAlloc->Reset());
+	ThrowIfFailed(mCommandList->Reset(cmdListAlloc, nullptr));
+
+	//ThrowIfFailed(mDirectCmdListAlloc->Reset());
 
 	// A command list can be reset after it has been added to the command queue via ExecuteCommandList.
 	// Reusing the command list reuses memory.
-	ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
+	//ThrowIfFailed(mCommandList->Reset(mDirectCmdListAlloc.Get(), nullptr));
 
 	ID3D12DescriptorHeap* descriptorHeaps[] = { mSrvDescriptorHeap.Get() };
 	mCommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
@@ -2115,7 +2120,10 @@ void MyRasterizerApp::Draw()
 	// Wait until frame commands are complete.  This waiting is inefficient and is
 	// done for simplicity.  Later we will show how to organize our rendering code
 	// so we do not have to wait per frame.
-	FlushCmdQueue();
+	//FlushCmdQueue();
+	mCurrentFence++;
+	mCurrFrameResource->FenceCPU = mCurrentFence;
+	mCommandQueue->Signal(mFence.Get(), mCurrentFence);
 }
 
 std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> MyRasterizerApp::GetStaticSamplers()
